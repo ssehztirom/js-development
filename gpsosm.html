@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>GPS + Compass on OSM</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <style>
+    #map { height: 100vh; }
+    #info { position:absolute;top:10px;left:10px;background:white;padding:8px;z-index:1000;font-family:sans-serif; }
+    #startBtn { position:absolute;top:60px;left:10px;z-index:1001;padding:6px 12px; }
+    .arrow { width:20px;height:20px;background:red;clip-path:polygon(50% 0%,0% 100%,100% 100%);transform-origin:50% 50%; }
+  </style>
+</head>
+<body>
+  <div id="info">Press Start to enable GPS + Compass</div>
+  <button id="startBtn">Start</button>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map').setView([0,0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
+
+    var arrowIcon = L.divIcon({className:'',html:'<div class="arrow" id="arrow"></div>',iconSize:[20,20],iconAnchor:[10,10]});
+    var marker = L.marker([0,0], {icon: arrowIcon}).addTo(map);
+    var heading = null;
+
+    document.getElementById("startBtn").onclick = async function() {
+      // HTTPS check
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        alert("Geolocation and compass require HTTPS or localhost.");
+        return;
+      }
+
+      // iOS compass permission
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          let res = await DeviceOrientationEvent.requestPermission();
+          if (res !== 'granted') {
+            alert("Compass permission denied. Only GPS will work.");
+          }
+        } catch(e) { console.error(e); }
+      }
+
+      // GPS
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(function(pos) {
+          var lat = pos.coords.latitude, lon = pos.coords.longitude;
+          marker.setLatLng([lat, lon]);
+          map.setView([lat, lon], 17);
+          updateInfo(lat, lon, heading);
+        }, function(err) {
+          alert("Geolocation error: " + err.message);
+        }, {enableHighAccuracy:true});
+      } else {
+        alert("Geolocation not supported");
+      }
+
+      // Compass
+      window.addEventListener("deviceorientation", function(event) {
+        if (event.alpha !== null) {
+          heading = event.alpha;
+          var pos = marker.getLatLng();
+          updateInfo(pos.lat, pos.lng, heading);
+          document.getElementById("arrow").style.transform = `rotate(${heading}deg)`;
+        }
+      }, true);
+    };
+
+    function updateInfo(lat, lon, head) {
+      let txt = `Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)}`;
+      if (head !== null) txt += `<br>Heading: ${head.toFixed(0)}°`;
+      document.getElementById("info").innerHTML = txt;
+    }
+  </script>
+</body>
+</html>
