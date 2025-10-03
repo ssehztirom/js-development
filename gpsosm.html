@@ -15,6 +15,7 @@
 <body>
   <div id="info">Press Start to enable GPS + Compass</div>
   <button id="startBtn">Start</button>
+	<button onclick="startGPS()">Test GPS</button>
   <div id="map"></div>
   <script>
     var map = L.map('map').setView([0,0], 2);
@@ -72,6 +73,32 @@
       if (head !== null) txt += `<br>Heading: ${head.toFixed(0)}°`;
       document.getElementById("info").innerHTML = txt;
     }
+		
+		function startGPS() {
+  if (!navigator.geolocation) {
+    console.log("Geolocation not supported");
+    return;
+  }
+
+  navigator.geolocation.watchPosition(
+    pos => {
+      console.log("Got position:",
+        pos.coords.latitude,
+        pos.coords.longitude,
+        "accuracy:", pos.coords.accuracy + "m"
+      );
+    },
+    err => {
+      console.error("GPS error:", err.code, err.message);
+      // Codes:
+      // 1 = PERMISSION_DENIED
+      // 2 = POSITION_UNAVAILABLE
+      // 3 = TIMEOUT
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+  );
+}
+
   </script>
 </body>
 </html>
