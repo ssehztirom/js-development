@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Predator–Prey Calibration (TensorFlow.js)</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0"></script>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+<h3>Parameter Calibration of Predator–Prey Model (Vectorized RK4 + Gradients)</h3>
+<div id="plot" style="width:900px;height:550px;"></div>
+
+<script>
+/* ---------- RK4 integrator ---------- */
+function rk4Step(f, y0, t0, dt, steps, k) {
+  let y = y0, t = tf.scalar(t0);
+  const halfDt = tf.scalar(dt/2), sixthDt = tf.scalar(dt/6), dtS = tf.scalar(dt);
+  for (let i = 0; i < steps; i++) {
+    const k1 = f(t, y, k);
+    const k2 = f(t.add(halfDt), y.add(k1.mul(halfDt)), k);
+    const k3 = f(t.add(halfDt), y.add(k2.mul(halfDt)), k);
+    const k4 = f(t.add(dtS), y.add(k3.mul(dtS)), k);
+    y = y.add(k1.add(k2.mul(2)).add(k3.mul(2)).add(k4).mul(sixthDt));
+    t = t.add(dtS);
+  }
+  return y;
+}
+
+/* ---------- Lotka–Volterra System ---------- */
+function predatorPreySystem(t, y, k) {
+  const [alpha, beta, delta, gamma] = tf.split(k, 4, 1);
+  const prey = y.slice([0,0],[-1,1]);
+  const pred = y.slice([0,1],[-1,1]);
+  const dy1 = alpha.mul(prey).sub(beta.mul(prey.mul(pred)));
+  const dy2 = delta.mul(prey.mul(pred)).sub(gamma.mul(pred));
+  return tf.concat([dy1, dy2], 1);
+}
+
+/* ---------- Generate Simulated Data ---------- */
+async function generateData(trueParams, y0, t0, dt, steps) {
+  let y = y0, t = t0;
+  const traj = [y];
+  for (let i=0;i<steps;i++){
+    y = rk4Step(predatorPreySystem, y, t, dt, 1, trueParams);
+    t += dt;
+    traj.push(y);
+  }
+  let Y = await tf.stack(traj).squeeze().array(); // [steps+1,2]
+  // add small Gaussian noise
+  Y = Y.map(v => [v[0]+0.3*Math.random(), v[1]+0.3*Math.random()]);
+  return Y;
+}
+
+/* ---------- Loss Function ---------- */
+function computeLoss(params, y0, t0, dt, data) {
+  return tf.tidy(() => {
+    let y = y0, t = t0;
+    const traj = [y];
+    for (let i=0;i<data.length-1;i++){
+			
+      y = rk4Step(predatorPreySystem, y, t, dt, 1, params);
+      t += dt;
+      traj.push(y);
+    }
+    const pred = tf.stack(traj).squeeze();
+    const obs = tf.tensor2d(data);
+		console.log(pred)
+    return pred.sub(obs).square().mean();  // MSE
+  });
+}
+
+/* ---------- Main ---------- */
+async function main(){
+  const t0=0, dt=0.05, steps=200;
+  const y0 = tf.tensor([[10,5]]);
+  const trueParams = tf.tensor([[1.0,0.1,0.075,1.5]]);
+  const data = await generateData(trueParams, y0, t0, dt, steps);
+  const times = Array.from({length:data.length},(_,i)=>t0+i*dt);
+
+  // Parameters to calibrate (initialized off)
+  const params = tf.variable(tf.tensor([[0.8,0.15,0.05,1.0]]));
+  const optimizer = tf.train.adam(0.02);
+
+  // Training loop
+  for (let epoch=0; epoch<300; epoch++){
+    optimizer.minimize(() => computeLoss(params, y0, t0, dt, data));
+		console.log(`Epoch ${epoch}  loss=${loss.toFixed(4)}  params=${params.dataSync()}`);
+    // if (epoch%50===0) {
+    //   const loss = computeLoss(params, y0, t0, dt, data).dataSync()[0];
+    //   console.log(`Epoch ${epoch}  loss=${loss.toFixed(4)}  params=${params.dataSync()}`);
+    //   await tf.nextFrame();
+    // }
+  }
+
+  // Predict with calibrated parameters
+  let y = y0, t = t0;
+  const traj = [y];
+  for (let i=0;i<steps;i++){
+    y = rk4Step(predatorPreySystem, y, t, dt, 1, params);
+    t += dt;
+    traj.push(y);
+  }
+  const Ypred = await tf.stack(traj).squeeze().array();
+  const pvals = Array.from(params.dataSync()).map(v=>v.toFixed(3));
+
+  // Plot data vs fitted curves
+  const traces = [
+    {x:times, y:data.map(d=>d[0]), mode:'markers', name:'Prey data'},
+    {x:times, y:data.map(d=>d[1]), mode:'markers', name:'Pred data'},
+    {x:times, y:Ypred.map(d=>d[0]), mode:'lines', name:'Prey fit'},
+    {x:times, y:Ypred.map(d=>d[1]), mode:'lines', name:'Pred fit', line:{dash:'dot'}}
+  ];
+  Plotly.newPlot('plot', traces, {
+    title:`Calibrated parameters: α=${pvals[0]}, β=${pvals[1]}, δ=${pvals[2]}, γ=${pvals[3]}`,
+    xaxis:{title:'Time'}, yaxis:{title:'Population'}, legend:{orientation:'h', y:-0.2}
+  });
+}
+
+main();
+</script>
+</body>
+</html>

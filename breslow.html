@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Survival Analysis App (KM, Cox, IPCW, Breslow)</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    svg { margin-top: 20px; border: 1px solid #ccc; }
+    table { border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: right; }
+    th { background: #f0f0f0; }
+    .results { margin-top: 20px; }
+    select, button, input { margin: 5px; padding: 5px; }
+    #sliderContainer { margin-top: 10px; }
+  </style>
+</head>
+
+<body>
+  <h1>Kaplan–Meier, Cox PH, IPCW, and Breslow Estimator</h1>
+
+  <h2>Step 1: Upload CSV</h2>
+  <input type="file" id="fileInput" accept=".csv" />
+
+  <div id="columnSelectors" style="display:none;">
+    <h2>Step 2: Select Columns</h2>
+    <label>Time column:</label>
+    <select id="timeCol"></select><br>
+    <label>Status column (0=censored,1=event):</label>
+    <select id="statusCol"></select><br>
+    <label>Covariates (hold Ctrl/Cmd to select multiple):</label>
+    <select id="covCols" multiple size="5"></select><br>
+    <button id="runBtn">Fit Models</button>
+  </div>
+
+  <div id="results" style="display:none;">
+    <h2>Kaplan–Meier Curve</h2>
+    <svg id="kmPlot" width="500" height="350"></svg>
+
+    <h2>Prediction Error Curves (IPCW Brier Score)</h2>
+    <div id="sliderContainer">
+      <label>Start time:</label>
+      <input type="range" id="tStartSlider" min="0" max="100" step="1">
+      <span id="tStartLabel"></span><br>
+      <label>End time:</label>
+      <input type="range" id="tEndSlider" min="0" max="100" step="1">
+      <span id="tEndLabel"></span><br>
+      <button id="plotPEC">Plot Prediction Error</button>
+    </div>
+    <svg id="pePlot" width="500" height="350"></svg>
+
+    <h2>Cox Model Coefficients</h2>
+    <div id="coefTable"></div>
+
+    <h2>IPEC (Integrated PEC over chosen interval)</h2>
+    <div id="ibsResults" class="results"></div>
+
+    <h2>Breslow Baseline Estimates</h2>
+    <div id="breslowTable" class="results"></div>
+  </div>
+
+  <script>
+    // Kaplan–Meier
+    function computeKM(data) {
+      let sorted = data.slice().sort((a, b) => a.time - b.time);
+      let n = sorted.length, surv = 1.0, curve = [{ time: 0, surv }];
+      for (let i = 0; i < sorted.length; i++) {
+        if (sorted[i].status === 1) surv *= (1 - 1 / (n - i));
+        curve.push({ time: sorted[i].time, surv });
+      }
+      return curve;
+    }
+
+    // Cox PH (Newton–Raphson)
+    function fitCox(data, covariateNames, maxIter = 50, tol = 1e-6) {
+      let p = covariateNames.length;
+      let beta = new Array(p).fill(0);
+      for (let iter = 0; iter < maxIter; iter++) {
+        let U = new Array(p).fill(0);
+        let I = Array.from({ length: p }, () => new Array(p).fill(0));
+        let sorted = data.slice().sort((a, b) => b.time - a.time);
+        let riskExp = 0, riskX = new Array(p).fill(0),
+          riskXX = Array.from({ length: p }, () => new Array(p).fill(0));
+        for (let i = 0; i < sorted.length; i++) {
+          let xi = covariateNames.map(k => sorted[i][k]);
+          let xb = xi.reduce((s, v, j) => s + beta[j] * v, 0);
+          let e = Math.exp(xb);
+          riskExp += e;
+          for (let j = 0; j < p; j++) {
+            riskX[j] += xi[j] * e;
+            for (let k = 0; k < p; k++) riskXX[j][k] += xi[j] * xi[k] * e;
+          }
+          if (sorted[i].status === 1) {
+            for (let j = 0; j < p; j++) {
+              U[j] += xi[j] - (riskX[j] / riskExp);
+              for (let k = 0; k < p; k++)
+                I[j][k] += (riskXX[j][k] / riskExp) - (riskX[j] * riskX[k]) / (riskExp * riskExp);
+            }
+          }
+        }
+        let delta = solveLinear(I, U);
+        let maxChange = 0;
+        for (let j = 0; j < p; j++) {
+          beta[j] += delta[j];
+          maxChange = Math.max(maxChange, Math.abs(delta[j]));
+        }
+        if (maxChange < tol) break;
+      }
+      return beta;
+    }
+
+    function solveLinear(A, b) {
+      let n = A.length;
+      let M = A.map((row, i) => row.concat(b[i]));
+      for (let i = 0; i < n; i++) {
+        let max = i;
+        for (let k = i + 1; k < n; k++)
+          if (Math.abs(M[k][i]) > Math.abs(M[max][i])) max = k;
+        [M[i], M[max]] = [M[max], M[i]];
+        let div = M[i][i];
+        for (let j = i; j <= n; j++) M[i][j] /= div;
+        for (let k = 0; k < n; k++)
+          if (k !== i) {
+            let factor = M[k][i];
+            for (let j = i; j <= n; j++) M[k][j] -= factor * M[i][j];
+          }
+      }
+      return M.map(r => r[n]);
+    }
+
+    // Breslow baseline cumulative hazard estimator
+    function breslowEstimator(data, beta, covariateNames) {
+      let sorted = data.slice().sort((a, b) => a.time - b.time);
+      let eventTimes = [...new Set(sorted.filter(d => d.status === 1).map(d => d.time))].sort((a, b) => a - b);
+      let H0 = 0, results = [];
+      eventTimes.forEach(t => {
+        let riskSum = 0, d = 0;
+        sorted.forEach(r => {
+          let x = covariateNames.map(v => r[v]);
+          let xb = x.reduce((s, v, j) => s + beta[j] * v, 0);
+          let e = Math.exp(xb);
+          if (r.time >= t) riskSum += e;
+          if (r.time === t && r.status === 1) d += 1;
+        });
+        let dH = d / riskSum;
+        H0 += dH;
+        results.push({ time: t, d, riskSum, dH, H0, S0: Math.exp(-H0) });
+      });
+      return results;
+    }
+
+    // Plot KM
+    function plotKM(curve) {
+      const svg = d3.select("#kmPlot");
+      svg.selectAll("*").remove();
+      const width = 500, height = 350, margin = 40;
+      const x = d3.scaleLinear().domain([0, d3.max(curve, d => d.time)]).range([margin, width - margin]);
+      const y = d3.scaleLinear().domain([0, 1]).range([height - margin, margin]);
+      const line = d3.line().x(d => x(d.time)).y(d => y(d.surv)).curve(d3.curveStepAfter);
+      svg.append("path").datum(curve).attr("fill", "none").attr("stroke", "steelblue").attr("stroke-width", 2).attr("d", line);
+      svg.append("g").attr("transform", `translate(0,${height - margin})`).call(d3.axisBottom(x));
+      svg.append("g").attr("transform", `translate(${margin},0)`).call(d3.axisLeft(y));
+    }
+
+    function showCoefficients(beta, covariates) {
+      let container = document.getElementById("coefTable");
+      container.innerHTML = "";
+      let table = document.createElement("table");
+      let header = document.createElement("tr");
+      ["Covariate", "Beta", "Hazard Ratio (exp(β))"].forEach(h => {
+        let th = document.createElement("th");
+        th.textContent = h;
+        header.appendChild(th);
+      });
+      table.appendChild(header);
+      covariates.forEach((c, i) => {
+        let row = document.createElement("tr");
+        row.innerHTML = `<td>${c}</td><td>${beta[i].toFixed(4)}</td><td>${Math.exp(beta[i]).toFixed(4)}</td>`;
+        table.appendChild(row);
+      });
+      container.appendChild(table);
+    }
+
+    function renderBreslowTable(breslow) {
+      let html = `<table><tr><th>Time</th><th>d(t)</th><th>Σexp(η)</th><th>ΔH(t)</th><th>H₀(t)</th><th>S₀(t)</th></tr>`;
+      breslow.forEach(r => {
+        html += `<tr><td>${r.time}</td><td>${r.d}</td><td>${r.riskSum.toFixed(4)}</td>
+                 <td>${r.dH.toFixed(6)}</td><td>${r.H0.toFixed(6)}</td><td>${r.S0.toFixed(6)}</td></tr>`;
+      });
+      html += "</table>";
+      document.getElementById("breslowTable").innerHTML = html;
+    }
+
+    // File upload + model fitting
+    let rawData = null, kmCurve = null, beta = null, covCols = null, times = null;
+
+    document.getElementById("fileInput").addEventListener("change", e => {
+      Papa.parse(e.target.files[0], {
+        header: true,
+        dynamicTyping: true,
+        complete: results => {
+          rawData = results.data.filter(d => Object.values(d).some(v => v !== undefined && v !== null && v !== ""));
+          let cols = Object.keys(rawData[0]);
+          let timeSel = document.getElementById("timeCol"),
+              statusSel = document.getElementById("statusCol"),
+              covSel = document.getElementById("covCols");
+          [timeSel, statusSel, covSel].forEach(sel => sel.innerHTML = "");
+          cols.forEach(c => {
+            [timeSel, statusSel, covSel].forEach(sel => {
+              let opt = document.createElement("option");
+              opt.textContent = c;
+              sel.appendChild(opt.cloneNode(true));
+            });
+          });
+          document.getElementById("columnSelectors").style.display = "block";
+        }
+      });
+    });
+
+    document.getElementById("runBtn").addEventListener("click", () => {
+      let timeCol = document.getElementById("timeCol").value;
+      let statusCol = document.getElementById("statusCol").value;
+      covCols = Array.from(document.getElementById("covCols").selectedOptions).map(o => o.value);
+      let data = rawData.map(d => ({
+        time: +d[timeCol],
+        status: +d[statusCol],
+        ...covCols.reduce((o, c) => { o[c] = +d[c]; return o; }, {})
+      }));
+
+      kmCurve = computeKM(data);
+      plotKM(kmCurve);
+      beta = fitCox(data, covCols);
+      times = [...new Set(data.map(d => d.time))].sort((a, b) => a - b);
+      showCoefficients(beta, covCols);
+
+      // Compute Breslow baseline and display
+      let breslow = breslowEstimator(data, beta, covCols);
+      renderBreslowTable(breslow);
+
+      document.getElementById("results").style.display = "block";
+    });
+  </script>
+</body>
+</html>

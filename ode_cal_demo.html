@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Differentiable ODE with Gradient Display (TensorFlow.js)</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+</head>
+<body>
+  <h2>Differentiable RK4 ODE Solver — Gradient Demo</h2>
+  <pre id="log"></pre>
+
+  <script>
+    // Define ODE: dy/dt = -k * y
+    function f(t, y, k) {
+      return y.mul(k.neg());
+    }
+
+    // Differentiable RK4 integrator
+    function rk4Step(y0, t0, dt, steps, k) {
+  let y = y0;
+  let t = t0;
+  const halfDt = dt.div(2);
+  const sixthDt = dt.div(6);
+
+  for (let i = 0; i < steps; i++) {
+    const k1 = f(t, y, k);
+    const k2 = f(t.add(halfDt), y.add(k1.mul(halfDt)), k);
+    const k3 = f(t.add(halfDt), y.add(k2.mul(halfDt)), k);
+    const k4 = f(t.add(dt), y.add(k3.mul(dt)), k);
+
+    // Compute weighted sum once
+    const increment = k1.add(k2.mul(2)).add(k3.mul(2)).add(k4).mul(sixthDt);
+
+    y = y.add(increment);
+    t = t.add(dt);
+  }
+  return y;
+}
+
+    // Generate noisy synthetic data (true k = 1.0)
+    const dt = tf.scalar(0.1);
+    const steps = 10;
+    const totalSteps = 50;
+    const noiseStd = 0.1;
+    const trueK = 1.0;
+
+    const times = [];
+    const noisyValues = [];
+    for (let i = 0; i < totalSteps; i++) {
+      const t = i * dt.dataSync()[0] * steps;
+      const trueVal = Math.exp(-trueK * t);
+      const noisyVal = trueVal + noiseStd * (Math.random() * 2 - 1);
+      times.push(t);
+      noisyValues.push(noisyVal);
+    }
+
+    // ODE simulation for a given k
+    function simulateODE(k) {
+      let y = tf.scalar(1.0);
+      let t = tf.scalar(0.0);
+      const preds = [];
+      for (let i = 0; i < totalSteps; i++) {
+        preds.push(y);
+        y = rk4Step(y, t, dt, steps, k);
+        t = t.add(dt.mul(steps));
+      }
+      return tf.stack(preds);
+    }
+
+    // Trainable variable
+    const k = tf.variable(tf.scalar(0.5));
+
+    // Optimizer
+    const optimizer = tf.train.adam(0.05);
+
+    // Training loop with gradient printing
+    async function train(epochs = 50) {
+      const log = document.getElementById('log');
+
+      for (let epoch = 0; epoch < epochs; epoch++) {
+        const {grads, lossValue} = tf.tidy(() => {
+          const grads = tf.variableGrads(() => {
+            const preds = simulateODE(k);
+            const labels = tf.tensor1d(noisyValues);
+            const loss = tf.losses.meanSquaredError(labels, preds);
+            return loss;
+          });
+          return {grads: grads, lossValue: grads.value};
+        });
+
+        // Apply gradients
+        optimizer.applyGradients({[k.name]: grads.grads[k.name]});
+
+        // Get values for display
+        const lossNum = (await grads.value.data())[0];
+        const kNum = (await k.data())[0];
+        const gradNum = (await grads.grads[k.name].data())[0];
+
+        log.textContent += `Epoch ${epoch}: loss=${lossNum.toFixed(5)}, k=${kNum.toFixed(4)}, grad=${gradNum.toFixed(5)}\n`;
+
+        // Memory cleanup
+        grads.value.dispose();
+        grads.grads[k.name].dispose();
+        await tf.nextFrame();
+      }
+
+      log.textContent += "\nTraining complete!";
+    }
+
+    train();
+  </script>
+</body>
+</html>

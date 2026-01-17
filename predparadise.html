@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Landmark Cox Prediction</title>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: sans-serif; margin: 40px; }
+  header { display: flex; justify-content: space-between; align-items: center; }
+  #logo { width: 120px; height: auto; }
+  label { display:block; margin-top:8px; }
+  input { margin-left:10px; }
+  button { margin-top:15px; }
+  #result { margin-top:20px; font-weight:bold; }
+  canvas { margin-top:25px; max-width:700px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h2>Landmark Cox Model Prediction</h2>
+  <img id="logo" src="log.png" alt="Logo">
+</header>
+
+<form id="form">
+  <label>Upload Baseline Hazard File (bh.csv): 
+    <input type="file" id="bhFile" accept=".csv">
+  </label>
+  <label>Upload Covariate File (covs.csv): 
+    <input type="file" id="covFile" accept=".csv">
+  </label>
+
+  <div id="covInputs"></div>
+
+  <label>Date of Diagnosis: <input type="date" id="diagDate" required></label>
+  <label>Actual Date (landmark evaluation): <input type="date" id="actualDate" required></label>
+  <label>Prediction Horizon (days): <input type="number" id="horizon" value="365" required></label>
+
+  <button type="button" onclick="predict()">Predict</button>
+</form>
+
+<div id="result"></div>
+<canvas id="survivalPlot"></canvas>
+
+<script>
+let baselineData = [];
+let covariateData = [];
+let covNames = [];
+let betaNames = [];
+let chartInstance = null;
+
+// --- Load baseline hazards ---
+document.getElementById("bhFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  Papa.parse(file, {
+    header: true,
+    dynamicTyping: true,
+    complete: res => {
+      baselineData = res.data.filter(r => !isNaN(r.hazard) && !isNaN(r.time) && r.strata !== undefined);
+      alert(`Loaded ${baselineData.length} baseline hazard rows`);
+    }
+  });
+});
+
+// --- Load covariates and create editable inputs ---
+document.getElementById("covFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  Papa.parse(file, {
+    header: true,
+    dynamicTyping: true,
+    complete: res => {
+      covariateData = res.data.filter(r => r.landmark !== undefined && !isNaN(r.landmark));
+      if (covariateData.length === 0) { alert("No rows in covs.csv"); return; }
+      const keys = Object.keys(covariateData[0]);
+      betaNames = keys.filter(k => k.toLowerCase().startsWith("beta"));
+      covNames = keys.filter(k => k !== "landmark" && !betaNames.includes(k));
+      buildCovInputs(covNames);
+      alert(`Loaded ${covariateData.length} covariate rows with fields: ${covNames.join(", ")}`);
+    }
+  });
+});
+
+function buildCovInputs(names) {
+  const div = document.getElementById("covInputs");
+  div.innerHTML = "<h3>Enter Covariate Values</h3>";
+  names.forEach(name => {
+    const label = document.createElement("label");
+    label.innerHTML = `${name}: <input type="number" id="${name}" step="any">`;
+    div.appendChild(label);
+  });
+}
+
+// --- Linear interpolation of cumulative baseline hazard ---
+function interpolateHazard(stratum, t) {
+  const subset = baselineData.filter(r => parseFloat(r.strata) === parseFloat(stratum)).sort((a,b) => a.time - b.time);
+  if (subset.length === 0) return 0;
+  if (t <= subset[0].time) return subset[0].hazard;
+  if (t >= subset[subset.length-1].time) return subset[subset.length-1].hazard;
+  for (let i=0; i<subset.length-1; i++) {
+    const t1=subset[i].time, t2=subset[i+1].time;
+    if (t>=t1 && t<=t2) {
+      const h1=subset[i].hazard, h2=subset[i+1].hazard;
+      const w=(t-t1)/(t2-t1);
+      return h1 + w*(h2-h1);
+    }
+  }
+  return subset[subset.length-1].hazard;
+}
+
+// --- Main prediction ---
+function predict() {
+  if (baselineData.length===0 || covariateData.length===0) {
+    alert("Please upload bh.csv and covs.csv first.");
+    return;
+  }
+
+  const diagDate = new Date(document.getElementById("diagDate").value);
+  const actualDate = new Date(document.getElementById("actualDate").value);
+  const horizon = parseFloat(document.getElementById("horizon").value);
+  const daysSinceDiag = (actualDate - diagDate) / (1000*60*60*24);
+
+  // Select landmark ≤ daysSinceDiag
+  const landmarks = covariateData.map(r => parseFloat(r.landmark)).sort((a,b)=>a-b);
+  let chosen = landmarks[0];
+  for (const lm of landmarks) if (lm <= daysSinceDiag) chosen = lm;
+
+  const row = covariateData.find(r => parseFloat(r.landmark) === chosen);
+  if (!row) { alert("No matching covariate row."); return; }
+
+  const betas = betaNames.map(b => parseFloat(row[b]));
+  const covs = covNames.map(c => {
+    const input = document.getElementById(c);
+    const val = parseFloat(input?.value);
+    return isNaN(val) ? parseFloat(row[c]) : val;
+  });
+
+  const lp = betas.reduce((s,b,i)=> s + b * covs[i], 0);
+  const H0_t1 = interpolateHazard(chosen, 0);
+  const H0_t2 = interpolateHazard(chosen, horizon);
+  const dH0 = H0_t2 - H0_t1;
+  const dHi = dH0 * Math.exp(lp);
+  const intervalProb = 1 - Math.exp(-dHi);
+
+  // Survival curve
+  const subset = baselineData.filter(r => parseFloat(r.strata) === chosen).sort((a,b)=>a.time-b.time);
+  const times = subset.map(r=>r.time).filter(t=>t<=horizon);
+  const surv = times.map(t => Math.exp(-interpolateHazard(chosen,t) * Math.exp(lp)));
+  plotSurvival(times, surv);
+
+  document.getElementById("result").innerHTML = `
+    <b>Results</b><br>
+    Landmark: ${chosen} days<br>
+    Covariates used: [${covs.join(", ")}]<br>
+    Betas: [${betas.join(", ")}]<br>
+    Linear predictor (LP): ${lp.toFixed(4)}<br>
+    ΔH₀ (0→${horizon}) = ${dH0.toExponential(6)}<br>
+    Event probability over ${horizon} days: ${(intervalProb*100).toFixed(2)}%
+  `;
+}
+
+// --- Plot survival ---
+function plotSurvival(times, surv) {
+  const ctx = document.getElementById("survivalPlot").getContext("2d");
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(ctx, {
+    type: "line",
+    data: { 
+      labels: times, 
+      datasets: [{ label: "Survival S(t)", data: surv, borderColor: "blue", borderWidth: 2, pointRadius: 0 }]
+    },
+    options: {
+      scales: {
+        x: { title: { display: true, text: "Time since landmark (days)" } },
+        y: { title: { display: true, text: "Survival Probability" }, min: 0, max: 1 }
+      },
+      plugins: { legend: { display: true } }
+    }
+  });
+}
+</script>
+
+</body>
+</html>

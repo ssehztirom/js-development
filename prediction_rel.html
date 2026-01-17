@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Landmark Cox Model Prediction Tool</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; line-height: 1.4; }
+  h1, h2 { font-size: 1.25rem; margin-bottom: .25rem; }
+  fieldset { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+  legend { font-weight: 600; }
+  label { display: block; margin-top: 8px; font-weight: 500; }
+  input, select, textarea { width: 100%; padding: 6px; border: 1px solid #bbb; border-radius: 5px; }
+  textarea { font-family: ui-monospace; min-height: 60px; }
+  button { background: #111; color: white; border: none; border-radius: 6px; padding: 10px 14px; margin-top: 8px; cursor: pointer; }
+  .warn { color: #a14; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #eee; padding: 6px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+</style>
+</head>
+<body>
+<h1>Landmark Cox Model Event Prediction</h1>
+<p>Load one or more baseline hazard tables (CSV from <code>basehaz()</code>) and specify a linear predictor equation for each landmark.</p>
+
+<fieldset id="modelsField">
+  <legend>1) Landmark models</legend>
+  <div id="modelList"></div>
+  <button id="addModelBtn">Add model</button>
+</fieldset>
+
+<fieldset>
+  <legend>2) Prediction parameters</legend>
+  <label>Choose landmark model:</label>
+  <select id="modelSelect"></select>
+
+  <label>Landmark time (L):</label>
+  <input type="number" step="any" id="landmarkTime" />
+
+  <label>Prediction window Δ (time after landmark):</label>
+  <input type="number" step="any" id="windowDelta" />
+
+  <button id="computeBtn" disabled>Compute Prediction</button>
+</fieldset>
+
+<div id="output"></div>
+
+<script>
+function parseCSV(text) {
+  const rows = text.trim().split(/\r?\n/).map(r => r.split(','));
+  const header = rows.shift().map(x => x.trim());
+  return rows.map(r => Object.fromEntries(r.map((v, i) => [header[i], v.trim()])));
+}
+
+function interpolateH0(rows, t) {
+  if (!rows.length) return NaN;
+  const times = rows.map(r => Number(r.time)), H = rows.map(r => Number(r.hazard));
+  if (t <= times[0]) return H[0];
+  if (t >= times[times.length-1]) return H[H.length-1];
+  for (let i=0; i<times.length-1; i++) {
+    if (times[i] <= t && t < times[i+1]) {
+      const w = (t - times[i]) / (times[i+1]-times[i]);
+      return H[i] + w*(H[i+1]-H[i]);
+    }
+  }
+  return H[H.length-1];
+}
+
+const modelList = document.getElementById('modelList');
+const addModelBtn = document.getElementById('addModelBtn');
+const modelSelect = document.getElementById('modelSelect');
+const computeBtn = document.getElementById('computeBtn');
+const output = document.getElementById('output');
+const landmarkTime = document.getElementById('landmarkTime');
+const windowDelta = document.getElementById('windowDelta');
+
+let models = [];
+
+function refreshModelSelect() {
+  modelSelect.innerHTML = models.map((m,i) =>
+    `<option value="${i}">${m.name}</option>`).join('');
+  computeBtn.disabled = models.length === 0;
+}
+
+addModelBtn.onclick = () => {
+  const id = models.length;
+  const div = document.createElement('div');
+  div.style.border = "1px solid #ddd";
+  div.style.padding = "10px";
+  div.style.marginBottom = "8px";
+  div.innerHTML = `
+    <label>Model name:</label>
+    <input type="text" id="name${id}" placeholder="e.g. Landmark 90d" />
+    <label>Baseline hazard CSV:</label>
+    <input type="file" id="csv${id}" accept=".csv" />
+    <label>Linear predictor expression (η = ...):</label>
+    <textarea id="eta${id}" placeholder="e.g. 0.03*age + 0.6*sex"></textarea>
+  `;
+  modelList.appendChild(div);
+
+  const model = { name: `Model ${id+1}`, bh: [], expr: "" };
+  models.push(model);
+
+  div.querySelector(`#name${id}`).oninput = e => { model.name = e.target.value; refreshModelSelect(); };
+  div.querySelector(`#eta${id}`).oninput = e => { model.expr = e.target.value; };
+  div.querySelector(`#csv${id}`).onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseCSV(reader.result);
+        model.bh = rows.map(r => ({ time: Number(r.time), hazard: Number(r.hazard) }))
+                       .filter(r => !isNaN(r.time) && !isNaN(r.hazard))
+                       .sort((a,b)=>a.time-b.time);
+        alert(`Loaded ${model.bh.length} rows for ${model.name}`);
+      } catch(err) {
+        alert("Error parsing CSV: " + err.message);
+      }
+    };
+    reader.readAsText(f);
+  };
+
+  refreshModelSelect();
+};
+
+computeBtn.onclick = () => {
+  const idx = Number(modelSelect.value);
+  const L = Number(landmarkTime.value);
+  const delta = Number(windowDelta.value);
+  if (isNaN(L) || isNaN(delta) || delta<=0) {
+    output.innerHTML = `<p class="warn">Provide valid numeric landmark time and window.</p>`;
+    return;
+  }
+
+  const model = models[idx];
+  if (!model || !model.bh.length) {
+    output.innerHTML = `<p class="warn">Selected model missing baseline hazard.</p>`;
+    return;
+  }
+
+  let eta;
+  try {
+    eta = Function("age","sex","x","return " + model.expr)(0,0,{}); // check parse
+  } catch { eta = null; }
+  const etaExpr = prompt("Enter covariate values as JSON, e.g. {\"age\":60,\"sex\":1}");
+  const x = JSON.parse(etaExpr);
+  const etaVal = Function(...Object.keys(x), "return " + model.expr)(...Object.values(x));
+
+  const t1 = L, t2 = L + delta;
+  const H1 = interpolateH0(model.bh, t1);
+  const H2 = interpolateH0(model.bh, t2);
+  const risk = Math.exp(etaVal);
+  const pCond = 1 - Math.exp(-(H2 - H1)*risk);
+
+  output.innerHTML = `
+  <fieldset><legend>Results</legend>
+  <table>
+    <tr><th>Model</th><td>${model.name}</td></tr>
+    <tr><th>Landmark L</th><td>${L}</td></tr>
+    <tr><th>Window Δ</th><td>${delta}</td></tr>
+    <tr><th>η</th><td>${etaVal.toFixed(4)}</td></tr>
+    <tr><th>e^η</th><td>${risk.toFixed(4)}</td></tr>
+    <tr><th>H₀(L)</th><td>${H1.toFixed(5)}</td></tr>
+    <tr><th>H₀(L+Δ)</th><td>${H2.toFixed(5)}</td></tr>
+    <tr><th>Event probability in [L, L+Δ]</th><td><b>${pCond.toFixed(6)}</b></td></tr>
+  </table></fieldset>`;
+};
+</script>
+</body>
+</html>

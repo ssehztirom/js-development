@@ -1,0 +1,1003 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>5D ODE + Dataset Builder + TFJS Autoencoder</title>
+
+  <!-- Plotly + TensorFlow.js (CDN) -->
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+
+  <style>
+    :root { --gap: 12px; --bg: #0b0c10; --panel: #12141a; --text: #e9eef6; --muted: #aab3c2; --border: #2a2f3a; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 14px 16px; border-bottom: 1px solid var(--border); background: #0f1117; }
+    header h1 { font-size: 16px; margin: 0 0 4px 0; font-weight: 600; }
+    header p { margin: 0; color: var(--muted); font-size: 12px; }
+
+    .wrap { display: grid; grid-template-columns: 420px 1fr; gap: var(--gap); padding: var(--gap); }
+    @media (max-width: 1100px) { .wrap { grid-template-columns: 1fr; } }
+
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+    .panel h2 { margin: 0 0 10px 0; font-size: 14px; font-weight: 650; }
+    .panel h3 { margin: 10px 0 6px 0; font-size: 12px; font-weight: 650; color: var(--muted); }
+    .group { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
+
+    .row { display: grid; grid-template-columns: 1fr 92px; align-items: center; gap: 10px; margin: 10px 0; }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+    input[type="range"] { width: 100%; }
+    .val { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text); text-align: right; }
+
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    button, select {
+      cursor: pointer; border: 1px solid var(--border); background: #1a1f2b; color: var(--text);
+      padding: 9px 10px; border-radius: 8px; font-size: 12px;
+    }
+    button:hover { background: #22293a; }
+    select { padding: 8px 10px; }
+
+    .plots { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+    @media (max-width: 1100px) { .plots { grid-template-columns: 1fr; } }
+    .plot { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+    .plot .title { font-size: 12px; color: var(--muted); margin: 2px 4px 6px 4px; }
+
+    #plot5 { grid-column: 1 / -1; }
+    #recplot5 { grid-column: 1 / -1; }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .small { font-size: 11px; color: var(--muted); line-height: 1.35; }
+    .status { margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .status strong { color: var(--text); font-weight: 650; }
+    code { background: #0f1117; padding: 1px 5px; border-radius: 6px; border: 1px solid var(--border); }
+    .hr { height: 1px; background: var(--border); margin: 10px 0; }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>5D ODE Simulator + Dataset Builder + TFJS Autoencoder</h1>
+  <p>Store two ODE parameterizations as Dataset 1 & 2 → generate many trajectories from each → standardize → train autoencoder → reconstruct & compare.</p>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>ODE controls</h2>
+
+    <div class="row">
+      <div>
+        <label for="t1">Duration (days)</label>
+        <input id="t1" type="range" min="7" max="120" step="1" value="28">
+      </div>
+      <div class="val" id="t1_val"></div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="dt">Integrator dt (days)</label>
+        <input id="dt" type="range" min="0.02" max="0.5" step="0.01" value="0.1">
+      </div>
+      <div class="val" id="dt_val"></div>
+    </div>
+
+    <div class="group">
+      <h3>Stimulus pulse</h3>
+      <div class="row">
+        <div>
+          <label for="stimAmp">stimAmp</label>
+          <input id="stimAmp" type="range" min="0" max="3" step="0.05" value="1.3">
+        </div>
+        <div class="val" id="stimAmp_val"></div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="stimCenter">stimCenter (day)</label>
+          <input id="stimCenter" type="range" min="0" max="60" step="0.5" value="5.5">
+        </div>
+        <div class="val" id="stimCenter_val"></div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="stimWidth">stimWidth (days)</label>
+          <input id="stimWidth" type="range" min="0.5" max="30" step="0.5" value="7">
+        </div>
+        <div class="val" id="stimWidth_val"></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>Selected dynamic parameters</h3>
+      <div class="row">
+        <div>
+          <label for="kI_prod">kI_prod (IL6 production)</label>
+          <input id="kI_prod" type="range" min="0" max="60" step="0.5" value="18">
+        </div>
+        <div class="val" id="kI_prod_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="kI_clear">kI_clear (IL6 clearance)</label>
+          <input id="kI_clear" type="range" min="0.1" max="6" step="0.05" value="2.4">
+        </div>
+        <div class="val" id="kI_clear_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="kC_prod">kC_prod (CRP production)</label>
+          <input id="kC_prod" type="range" min="0" max="80" step="0.5" value="35">
+        </div>
+        <div class="val" id="kC_prod_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="kC_clear">kC_clear (CRP clearance)</label>
+          <input id="kC_clear" type="range" min="0.05" max="4" step="0.05" value="1.1">
+        </div>
+        <div class="val" id="kC_clear_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="kFe_block">kFe_block (IL6 → Iron block)</label>
+          <input id="kFe_block" type="range" min="0" max="0.08" step="0.001" value="0.02">
+        </div>
+        <div class="val" id="kFe_block_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="kHb_prod">kHb_prod (Hb production)</label>
+          <input id="kHb_prod" type="range" min="0" max="1" step="0.01" value="0.25">
+        </div>
+        <div class="val" id="kHb_prod_val"></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>Noise</h3>
+      <div class="row">
+        <div>
+          <label for="noiseScale">Noise scale (multiplier)</label>
+          <input id="noiseScale" type="range" min="0" max="3" step="0.05" value="1">
+        </div>
+        <div class="val" id="noiseScale_val"></div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="seed">Base seed</label>
+          <input id="seed" type="range" min="1" max="9999" step="1" value="1234">
+        </div>
+        <div class="val" id="seed_val"></div>
+      </div>
+      <div class="btns">
+        <button id="rerun">Rerun current ODE</button>
+        <button id="reset">Reset ODE sliders</button>
+      </div>
+      <div class="small">
+        Noise is added as <code>y_noisy = max(0, y + Normal(0, sd))</code> with variable-specific base sds scaled by "Noise scale".
+      </div>
+    </div>
+
+    <div class="hr"></div>
+
+    <h2>Dataset builder</h2>
+    <div class="btns">
+      <button id="store1">Store current sliders as Dataset 1</button>
+      <button id="store2">Store current sliders as Dataset 2</button>
+    </div>
+    <div class="status" id="dsStatus">
+      Dataset 1: <strong>not stored</strong><br>
+      Dataset 2: <strong>not stored</strong>
+    </div>
+
+    <div class="group">
+      <h3>Training mixture</h3>
+      <div class="row">
+        <div>
+          <label for="nTraj1"># trajectories from Dataset 1</label>
+          <input id="nTraj1" type="range" min="0" max="200" step="1" value="60">
+        </div>
+        <div class="val" id="nTraj1_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="nTraj2"># trajectories from Dataset 2</label>
+          <input id="nTraj2" type="range" min="0" max="200" step="1" value="60">
+        </div>
+        <div class="val" id="nTraj2_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="latentDim">Latent dim</label>
+          <input id="latentDim" type="range" min="2" max="64" step="1" value="16">
+        </div>
+        <div class="val" id="latentDim_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="epochs">Epochs</label>
+          <input id="epochs" type="range" min="1" max="200" step="1" value="60">
+        </div>
+        <div class="val" id="epochs_val"></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="batchSize">Batch size</label>
+          <input id="batchSize" type="range" min="8" max="256" step="8" value="32">
+        </div>
+        <div class="val" id="batchSize_val"></div>
+      </div>
+
+      <div class="btns">
+        <button id="trainAE">Train autoencoder</button>
+      </div>
+
+      <div class="status">
+        <div>Training status: <span id="trainStatus"><strong>idle</strong></span></div>
+        <div>Final loss: <span id="trainLoss" class="mono">--</span></div>
+      </div>
+
+      <div class="small">
+        Standardization uses the <strong>mixed training set</strong> (Dataset1+Dataset2) mean/std per feature-dimension.<br>
+        For plotting reconstructions, outputs are transformed back with the <strong>training mean/std</strong>.
+      </div>
+    </div>
+
+    <div class="group">
+      <h3>Reconstruct one trajectory</h3>
+      <div class="btns">
+        <select id="whichDS">
+          <option value="1">Dataset 1</option>
+          <option value="2">Dataset 2</option>
+        </select>
+
+        <select id="whichTraj">
+          <option value="0">Trajectory #0</option>
+        </select>
+
+        <button id="reconstructBtn">Reconstruct</button>
+      </div>
+
+      <div class="small">
+        Trajectories are generated deterministically from the dataset snapshot using seeds <code>baseSeed + idx</code>.
+      </div>
+    </div>
+
+  </div>
+
+  <div>
+    <div class="plots">
+      <div class="plot">
+        <div class="title">Current ODE: Lymphocytes</div>
+        <div id="plot1"></div>
+      </div>
+      <div class="plot">
+        <div class="title">Current ODE: IL6</div>
+        <div id="plot2"></div>
+      </div>
+      <div class="plot">
+        <div class="title">Current ODE: CRP</div>
+        <div id="plot3"></div>
+      </div>
+      <div class="plot">
+        <div class="title">Current ODE: Iron</div>
+        <div id="plot4"></div>
+      </div>
+      <div class="plot" id="plot5">
+        <div class="title">Current ODE: Hemoglobin</div>
+        <div id="plot5_inner"></div>
+      </div>
+
+      <div class="plot">
+        <div class="title">Reconstruction: Lymphocytes (original vs reconstructed)</div>
+        <div id="recplot1"></div>
+      </div>
+      <div class="plot">
+        <div class="title">Reconstruction: IL6 (original vs reconstructed)</div>
+        <div id="recplot2"></div>
+      </div>
+      <div class="plot">
+        <div class="title">Reconstruction: CRP (original vs reconstructed)</div>
+        <div id="recplot3"></div>
+      </div>
+      <div class="plot">
+        <div class="title">Reconstruction: Iron (original vs reconstructed)</div>
+        <div id="recplot4"></div>
+      </div>
+      <div class="plot" id="recplot5">
+        <div class="title">Reconstruction: Hemoglobin (original vs reconstructed)</div>
+        <div id="recplot5_inner"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================
+   1) RNG + Noise
+   ========================= */
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return function() {
+    t += 0x6D2B79F5;
+    let x = Math.imul(t ^ (t >>> 15), 1 | t);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  }
+}
+
+// Box-Muller using seeded RNG
+function randnFactory(rng) {
+  return function randn(mean = 0, sd = 1) {
+    let u = 0, v = 0;
+    while (u === 0) u = rng();
+    while (v === 0) v = rng();
+    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    return mean + sd * z;
+  };
+}
+
+// Requested: function to add noise (row-wise)
+function addNoiseToRow(row, noiseSds, randn) {
+  const out = { t: row.t };
+  for (const k of ["Lymphocytes","IL6","CRP","Iron","Hemoglobin"]) {
+    const noisy = row[k] + randn(0, noiseSds[k]);
+    out[k] = Math.max(0, noisy);
+  }
+  return out;
+}
+
+/* =========================
+   2) ODE + RK4
+   ========================= */
+function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+function addVec(a, b) { return a.map((v, i) => v + b[i]); }
+function scaleVec(a, s) { return a.map(v => v * s); }
+
+function rk4Step(f, t, y, dt, params) {
+  const k1 = f(t, y, params);
+  const k2 = f(t + dt/2, addVec(y, scaleVec(k1, dt/2)), params);
+  const k3 = f(t + dt/2, addVec(y, scaleVec(k2, dt/2)), params);
+  const k4 = f(t + dt, addVec(y, scaleVec(k3, dt)), params);
+  const incr = scaleVec(
+    addVec(addVec(k1, scaleVec(addVec(k2, k3), 2)), k4),
+    dt/6
+  );
+  return addVec(y, incr);
+}
+
+// 5D state: [L, IL6, CRP, Iron, Hb]
+function odeSystem(t, y, p) {
+  let [L, IL6, CRP, Iron, Hb] = y;
+
+  const stim =
+    p.stimAmp *
+    (1 / (1 + Math.exp(-(t - p.stimCenter) / p.stimRise))) *
+    (1 - 1 / (1 + Math.exp(-(t - (p.stimCenter + p.stimWidth)) / p.stimFall)));
+
+  L = clamp(L, 0, 1e9); IL6 = clamp(IL6, 0, 1e9); CRP = clamp(CRP, 0, 1e9);
+  Iron = clamp(Iron, 0, 1e9); Hb = clamp(Hb, 0, 1e9);
+
+  const dIL6 =
+    p.kI_prod * stim +
+    p.kI_anemia * Math.max(0, p.Hb0 - Hb) -
+    p.kI_clear * IL6 -
+    p.kI_resolve * (L / p.L0) * IL6;
+
+  const hillIL6 = Math.pow(IL6, p.nC) / (Math.pow(p.KC, p.nC) + Math.pow(IL6, p.nC));
+  const dCRP = p.kC_prod * hillIL6 - p.kC_clear * CRP;
+
+  const inflam = p.wI * IL6 + p.wC * CRP;
+  const dL = p.kL_recover * (p.L0 - L) - p.kL_suppress * inflam * (L / p.L0);
+
+  const dIron =
+    p.kFe_replete * (p.Fe0 - Iron) - p.kFe_block * IL6 * (Iron / (p.Fe0 + 1e-9));
+
+  const ironFrac = Iron / (p.Fe0 + 1e-9);
+  const hbSupp = 1 / (1 + p.aHbI * IL6 + p.aHbC * CRP);
+  const dHb = p.kHb_prod * ironFrac * hbSupp - p.kHb_decay * (Hb - p.Hb0);
+
+  return [dL, dIL6, dCRP, dIron, dHb];
+}
+
+function simulateTrajectory({t0, t1, dt, y0, params, noiseScale, seed}) {
+  const p = {
+    // baselines
+    L0: 2.0, Fe0: 100.0, Hb0: 14.5,
+
+    // forcing
+    stimAmp: 1.3, stimCenter: 5.5, stimWidth: 7.0, stimRise: 0.7, stimFall: 0.7,
+
+    // IL6
+    kI_prod: 18.0, kI_anemia: 0.25, kI_clear: 2.4, kI_resolve: 0.18,
+
+    // CRP
+    kC_prod: 35.0, kC_clear: 1.1, KC: 10.0, nC: 2.0,
+
+    // L
+    kL_recover: 0.55, kL_suppress: 0.02, wI: 0.02, wC: 0.01,
+
+    // Fe
+    kFe_replete: 0.65, kFe_block: 0.02,
+
+    // Hb
+    kHb_prod: 0.25, kHb_decay: 0.03, aHbI: 0.02, aHbC: 0.01,
+
+    ...params,
+  };
+
+  const baseNoise = {
+    Lymphocytes: 0.03,
+    IL6: 0.15,
+    CRP: 0.20,
+    Iron: 1.5,
+    Hemoglobin: 0.08,
+  };
+  const noiseSds = {};
+  for (const k in baseNoise) noiseSds[k] = baseNoise[k] * noiseScale;
+
+  const rng = mulberry32(seed);
+  const randn = randnFactory(rng);
+
+  let t = t0;
+  let y = [...y0];
+
+  const clean = [];
+  const noisy = [];
+  const steps = Math.floor((t1 - t0) / dt);
+
+  for (let i = 0; i <= steps; i++) {
+    const row = {
+      t,
+      Lymphocytes: y[0],
+      IL6: y[1],
+      CRP: y[2],
+      Iron: y[3],
+      Hemoglobin: y[4],
+    };
+    clean.push(row);
+    noisy.push(addNoiseToRow(row, noiseSds, randn));
+
+    y = rk4Step(odeSystem, t, y, dt, p);
+    t += dt;
+  }
+
+  return { clean, noisy };
+}
+
+/* =========================
+   3) Resampling to fixed length
+   ========================= */
+const FIXED_LEN = 200; // for the autoencoder input length (time points)
+
+function lerp(a, b, w) { return a + (b - a) * w; }
+
+// linear interpolation of a scalar time series to FIXED_LEN points over [0, t1]
+function resampleSeries(tArr, yArr, t1, n = FIXED_LEN) {
+  const out = new Array(n);
+  const target = new Array(n);
+  for (let i = 0; i < n; i++) target[i] = (t1 * i) / (n - 1);
+
+  let j = 0;
+  for (let i = 0; i < n; i++) {
+    const tt = target[i];
+    while (j < tArr.length - 2 && tArr[j + 1] < tt) j++;
+    const t0 = tArr[j], t1_ = tArr[j + 1];
+    const y0 = yArr[j], y1 = yArr[j + 1];
+    const w = (t1_ === t0) ? 0 : (tt - t0) / (t1_ - t0);
+    out[i] = lerp(y0, y1, clamp(w, 0, 1));
+  }
+  return { t: target, y: out };
+}
+
+// from a trajectory rows -> matrix [FIXED_LEN, 5] (noisy or clean)
+function trajectoryToMatrix(rows, t1) {
+  const tArr = rows.map(r => r.t);
+  const keys = ["Lymphocytes","IL6","CRP","Iron","Hemoglobin"];
+
+  const mats = [];
+  const tFixed = [];
+  for (let k = 0; k < keys.length; k++) {
+    const yArr = rows.map(r => r[keys[k]]);
+    const rs = resampleSeries(tArr, yArr, t1, FIXED_LEN);
+    if (k === 0) tFixed.push(...rs.t);
+    mats.push(rs.y);
+  }
+
+  // transpose to [T,5]
+  const out = Array.from({length: FIXED_LEN}, (_, i) => mats.map(col => col[i]));
+  return { tFixed, mat: out };
+}
+
+// flatten [T,5] -> [T*5]
+function flattenMat(mat) {
+  const out = new Array(mat.length * mat[0].length);
+  let idx = 0;
+  for (let i = 0; i < mat.length; i++) {
+    for (let j = 0; j < mat[i].length; j++) out[idx++] = mat[i][j];
+  }
+  return out;
+}
+function unflattenVec(vec, T = FIXED_LEN, D = 5) {
+  const out = Array.from({length: T}, () => new Array(D));
+  let idx = 0;
+  for (let i = 0; i < T; i++) for (let j = 0; j < D; j++) out[i][j] = vec[idx++];
+  return out;
+}
+
+/* =========================
+   4) Plotting helpers
+   ========================= */
+function commonLayout(yTitle) {
+  return {
+    margin: {l: 45, r: 15, t: 6, b: 38},
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    font: {color: "#e9eef6"},
+    xaxis: {title: "Time (days)", gridcolor: "#2a2f3a", zerolinecolor: "#2a2f3a"},
+    yaxis: {title: yTitle, gridcolor: "#2a2f3a", zerolinecolor: "#2a2f3a"},
+    legend: {orientation: "h", y: 1.15, x: 0},
+  };
+}
+
+function plotCurrent(clean, noisy) {
+  const xs = clean.map(r => r.t);
+  const keys = [
+    ["Lymphocytes", "plot1", "Lymphocytes (arb)"],
+    ["IL6", "plot2", "IL6 (arb)"],
+    ["CRP", "plot3", "CRP (arb)"],
+    ["Iron", "plot4", "Iron (arb)"],
+    ["Hemoglobin", "plot5_inner", "Hemoglobin (arb)"],
+  ];
+  keys.forEach(([key, divId, yTitle]) => {
+    const cleanY = clean.map(r => r[key]);
+    const noisyY = noisy.map(r => r[key]);
+    const traces = [
+      {x: xs, y: cleanY, name: "clean", mode: "lines", line: {width: 2}},
+      {x: xs, y: noisyY, name: "noisy", mode: "markers", marker: {size: 4, opacity: 0.7}},
+    ];
+    Plotly.react(divId, traces, commonLayout(yTitle), {displayModeBar: false, responsive: true});
+  });
+}
+
+function plotReconstruction(tFixed, origMat, recMat) {
+  const keys = [
+    ["Lymphocytes", 0, "recplot1", "Lymphocytes (arb)"],
+    ["IL6", 1, "recplot2", "IL6 (arb)"],
+    ["CRP", 2, "recplot3", "CRP (arb)"],
+    ["Iron", 3, "recplot4", "Iron (arb)"],
+    ["Hemoglobin", 4, "recplot5_inner", "Hemoglobin (arb)"],
+  ];
+  keys.forEach(([name, j, divId, yTitle]) => {
+    const traces = [
+      {x: tFixed, y: origMat.map(r => r[j]), name: "original", mode: "lines", line: {width: 2}},
+      {x: tFixed, y: recMat.map(r => r[j]), name: "reconstructed", mode: "lines", line: {width: 2, dash: "dot"}},
+    ];
+    Plotly.react(divId, traces, commonLayout(yTitle), {displayModeBar: false, responsive: true});
+  });
+}
+
+/* =========================
+   5) UI wiring (ODE)
+   ========================= */
+const defaults = {
+  t1: 28, dt: 0.1,
+  stimAmp: 1.3, stimCenter: 5.5, stimWidth: 7.0,
+  kI_prod: 18.0, kI_clear: 2.4,
+  kC_prod: 35.0, kC_clear: 1.1,
+  kFe_block: 0.02, kHb_prod: 0.25,
+  noiseScale: 1.0, seed: 1234,
+
+  nTraj1: 60, nTraj2: 60,
+  latentDim: 16, epochs: 60, batchSize: 32,
+};
+
+const ids = Object.keys(defaults);
+const el = {};
+ids.forEach(id => { el[id] = document.getElementById(id); el[id + "_val"] = document.getElementById(id + "_val"); });
+
+function updateValueLabels() {
+  ids.forEach(id => {
+    if (!el[id]) return;
+    const raw = el[id].value;
+    let txt = raw;
+    if (["dt","stimAmp","stimCenter","stimWidth","kI_prod","kI_clear","kC_prod","kC_clear","noiseScale"].includes(id)) txt = Number(raw).toFixed(2);
+    if (id === "kFe_block") txt = Number(raw).toFixed(3);
+    if (id === "kHb_prod") txt = Number(raw).toFixed(2);
+    if (["t1","seed","nTraj1","nTraj2","latentDim","epochs","batchSize"].includes(id)) txt = String(parseInt(raw, 10));
+    el[id + "_val"].textContent = txt;
+  });
+}
+
+function readUI() {
+  const v = {};
+  ids.forEach(id => {
+    if (el[id]) v[id] = parseFloat(el[id].value);
+  });
+  return v;
+}
+
+function getODEParamsFromUI(ui) {
+  return {
+    stimAmp: ui.stimAmp,
+    stimCenter: ui.stimCenter,
+    stimWidth: ui.stimWidth,
+    kI_prod: ui.kI_prod,
+    kI_clear: ui.kI_clear,
+    kC_prod: ui.kC_prod,
+    kC_clear: ui.kC_clear,
+    kFe_block: ui.kFe_block,
+    kHb_prod: ui.kHb_prod,
+  };
+}
+
+function runCurrentODEAndPlot() {
+  const ui = readUI();
+  const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
+
+  const traj = simulateTrajectory({
+    t0: 0, t1: ui.t1, dt: ui.dt,
+    y0,
+    params: getODEParamsFromUI(ui),
+    noiseScale: ui.noiseScale,
+    seed: Math.floor(ui.seed),
+  });
+
+  plotCurrent(traj.clean, traj.noisy);
+  return traj;
+}
+
+/* =========================
+   6) Dataset snapshots + stats
+   ========================= */
+let dataset1 = null;
+let dataset2 = null;
+
+// Per-dataset mean/sd (optional bookkeeping, as you requested)
+let ds1Stats = null;
+let ds2Stats = null;
+
+// Training mean/sd (used for standardize/invert in the AE)
+let trainMean = null; // Float32Array length inputDim
+let trainStd  = null; // Float32Array length inputDim
+
+function computeDatasetStats(snapshot, nTraj, baseSeed) {
+  // Compute mean/sd over flattened vectors for this dataset snapshot (noisy trajectories).
+  // Returns {mean, sd} as Float32Array length inputDim
+  const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
+  const inputDim = FIXED_LEN * 5;
+  const all = [];
+
+  for (let i = 0; i < nTraj; i++) {
+    const seed = baseSeed + i;
+    const tr = simulateTrajectory({
+      t0: 0, t1: snapshot.t1, dt: snapshot.dt,
+      y0,
+      params: snapshot.params,
+      noiseScale: snapshot.noiseScale,
+      seed
+    });
+    const { mat } = trajectoryToMatrix(tr.noisy, snapshot.t1);
+    all.push(flattenMat(mat));
+  }
+
+  // mean/std in JS (safe for small-ish n)
+  const mean = new Float32Array(inputDim);
+  const sd = new Float32Array(inputDim);
+
+  for (let d = 0; d < inputDim; d++) {
+    let s = 0;
+    for (let i = 0; i < all.length; i++) s += all[i][d];
+    mean[d] = s / all.length;
+  }
+  for (let d = 0; d < inputDim; d++) {
+    let v = 0;
+    for (let i = 0; i < all.length; i++) {
+      const z = all[i][d] - mean[d];
+      v += z * z;
+    }
+    sd[d] = Math.sqrt(v / all.length) || 1e-6;
+  }
+  return { mean, sd };
+}
+
+function updateDatasetStatus() {
+  const s = document.getElementById("dsStatus");
+  const d1 = dataset1 ? "stored" : "not stored";
+  const d2 = dataset2 ? "stored" : "not stored";
+  s.innerHTML =
+    `Dataset 1: <strong>${d1}</strong>${dataset1 ? ` <span class="small">(t1=${dataset1.t1}, dt=${dataset1.dt}, noise=${dataset1.noiseScale})</span>` : ""}<br>` +
+    `Dataset 2: <strong>${d2}</strong>${dataset2 ? ` <span class="small">(t1=${dataset2.t1}, dt=${dataset2.dt}, noise=${dataset2.noiseScale})</span>` : ""}`;
+}
+
+function refreshTrajSelector() {
+  const whichDS = document.getElementById("whichDS").value;
+  const n = (whichDS === "1") ? parseInt(el.nTraj1.value, 10) : parseInt(el.nTraj2.value, 10);
+  const sel = document.getElementById("whichTraj");
+  sel.innerHTML = "";
+  const m = Math.max(1, n);
+  for (let i = 0; i < m; i++) {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = `Trajectory #${i}`;
+    sel.appendChild(opt);
+  }
+}
+
+/* =========================
+   7) Autoencoder (TFJS)
+   ========================= */
+let aeModel = null;
+let aeInputDim = FIXED_LEN * 5;
+
+function buildAutoencoder(inputDim, latentDim) {
+  // A simple dense AE on flattened trajectories
+  const input = tf.input({shape: [inputDim]});
+  const enc1 = tf.layers.dense({units: 256, activation: "relu"}).apply(input);
+  const enc2 = tf.layers.dense({units: 64, activation: "relu"}).apply(enc1);
+  const latent = tf.layers.dense({units: latentDim, activation: "linear", name: "latent"}).apply(enc2);
+
+  const dec1 = tf.layers.dense({units: 64, activation: "relu"}).apply(latent);
+  const dec2 = tf.layers.dense({units: 256, activation: "relu"}).apply(dec1);
+  const out = tf.layers.dense({units: inputDim, activation: "linear"}).apply(dec2);
+
+  const model = tf.model({inputs: input, outputs: out});
+  model.compile({optimizer: tf.train.adam(1e-3), loss: "meanSquaredError"});
+  return model;
+}
+
+function standardizeTensor2D(x2d, meanArr, stdArr) {
+  // x2d: [N, D]
+  const mean = tf.tensor1d(meanArr);
+  const std = tf.tensor1d(stdArr);
+  const z = x2d.sub(mean).div(std);
+  mean.dispose(); std.dispose();
+  return z;
+}
+
+function destandardize1D(x1d, meanArr, stdArr) {
+  const mean = tf.tensor1d(meanArr);
+  const std = tf.tensor1d(stdArr);
+  const y = x1d.mul(std).add(mean);
+  mean.dispose(); std.dispose();
+  return y;
+}
+
+async function makeTrainingData() {
+  if (!dataset1 && !dataset2) throw new Error("Store at least one dataset first.");
+
+  const ui = readUI();
+  const n1 = parseInt(ui.nTraj1, 10);
+  const n2 = parseInt(ui.nTraj2, 10);
+
+  if ((!dataset1 && n1 > 0) || (!dataset2 && n2 > 0)) {
+    throw new Error("You requested trajectories from a dataset that isn't stored.");
+  }
+  const total = n1 + n2;
+  if (total <= 0) throw new Error("Set #trajectories > 0 for training.");
+
+  const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
+  const X = [];
+  // helper: add trajectories from a snapshot
+  function addFromSnapshot(snapshot, n, baseSeed) {
+    for (let i = 0; i < n; i++) {
+      const seed = baseSeed + i;
+      const tr = simulateTrajectory({
+        t0: 0, t1: snapshot.t1, dt: snapshot.dt,
+        y0,
+        params: snapshot.params,
+        noiseScale: snapshot.noiseScale,
+        seed
+      });
+      const { mat } = trajectoryToMatrix(tr.noisy, snapshot.t1);
+      X.push(flattenMat(mat));
+    }
+  }
+
+  const baseSeed = Math.floor(ui.seed);
+  if (dataset1) addFromSnapshot(dataset1, n1, baseSeed + 10000);
+  if (dataset2) addFromSnapshot(dataset2, n2, baseSeed + 20000);
+
+  const x2d = tf.tensor2d(X, [X.length, aeInputDim], "float32");
+
+  // compute training mean/std (per feature dimension) on the mixed training set
+  const {mean, variance} = tf.moments(x2d, 0);
+  const std = tf.sqrt(variance.add(tf.scalar(1e-6)));
+
+  trainMean = await mean.data();
+  trainStd  = await std.data();
+
+  mean.dispose(); variance.dispose(); std.dispose();
+
+  const z2d = standardizeTensor2D(x2d, trainMean, trainStd);
+  x2d.dispose();
+
+  return { z2d, n: X.length };
+}
+
+async function trainAutoencoder() {
+  const statusEl = document.getElementById("trainStatus");
+  const lossEl = document.getElementById("trainLoss");
+  statusEl.innerHTML = "<strong>preparing data…</strong>";
+  lossEl.textContent = "--";
+
+  const ui = readUI();
+  const latentDim = parseInt(ui.latentDim, 10);
+  const epochs = parseInt(ui.epochs, 10);
+  const batchSize = parseInt(ui.batchSize, 10);
+
+  try {
+    const { z2d, n } = await makeTrainingData();
+
+    // (Optional bookkeeping): compute per-dataset mean/sd too (small sample)
+    // This is separate from trainMean/trainStd, and not used for AE scaling.
+    // You asked to track them for the two datasets.
+    statusEl.innerHTML = `<strong>computing dataset stats…</strong>`;
+    if (dataset1) ds1Stats = computeDatasetStats(dataset1, Math.min(20, parseInt(el.nTraj1.value,10) || 20), Math.floor(ui.seed)+30000);
+    if (dataset2) ds2Stats = computeDatasetStats(dataset2, Math.min(20, parseInt(el.nTraj2.value,10) || 20), Math.floor(ui.seed)+40000);
+
+    // build model
+    if (aeModel) { aeModel.dispose(); aeModel = null; }
+    aeModel = buildAutoencoder(aeInputDim, latentDim);
+
+    statusEl.innerHTML = `<strong>training…</strong> <span class="small">(samples=${n}, inputDim=${aeInputDim}, latent=${latentDim})</span>`;
+
+    let lastLoss = null;
+    await aeModel.fit(z2d, z2d, {
+      epochs,
+      batchSize,
+      shuffle: true,
+      callbacks: {
+        onEpochEnd: async (epoch, logs) => {
+          lastLoss = logs.loss;
+          statusEl.innerHTML = `<strong>training…</strong> epoch ${epoch+1}/${epochs} <span class="mono">loss=${logs.loss.toExponential(3)}</span>`;
+          await tf.nextFrame();
+        }
+      }
+    });
+
+    z2d.dispose();
+    statusEl.innerHTML = "<strong>done</strong>";
+    lossEl.textContent = (lastLoss == null) ? "--" : Number(lastLoss).toExponential(6);
+
+  } catch (err) {
+    statusEl.innerHTML = `<strong>error</strong>`;
+    lossEl.textContent = String(err.message || err);
+    console.error(err);
+  }
+}
+
+async function reconstructOne() {
+  const which = document.getElementById("whichDS").value;
+  const idx = parseInt(document.getElementById("whichTraj").value, 10);
+
+  if (!aeModel) {
+    alert("Train the autoencoder first.");
+    return;
+  }
+  if (!trainMean || !trainStd) {
+    alert("Missing training mean/std. Train again.");
+    return;
+  }
+
+  const snap = (which === "1") ? dataset1 : dataset2;
+  if (!snap) {
+    alert("Selected dataset not stored.");
+    return;
+  }
+
+  const ui = readUI();
+  const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
+  const seed = Math.floor(ui.seed) + (which === "1" ? 10000 : 20000) + idx;
+
+  // generate one noisy trajectory
+  const tr = simulateTrajectory({
+    t0: 0, t1: snap.t1, dt: snap.dt,
+    y0,
+    params: snap.params,
+    noiseScale: snap.noiseScale,
+    seed
+  });
+
+  const { tFixed, mat } = trajectoryToMatrix(tr.noisy, snap.t1);
+  const xVec = flattenMat(mat);
+
+  // standardize with TRAINING mean/std, run AE, inverse-transform
+  const x = tf.tensor2d([xVec], [1, aeInputDim], "float32");
+  const z = standardizeTensor2D(x, trainMean, trainStd);
+  x.dispose();
+
+  const yHatZ = aeModel.predict(z);
+  z.dispose();
+
+  // yHatZ is a Tensor [1, D]
+  const yHatZ1d = yHatZ.squeeze();
+  yHatZ.dispose();
+
+  const yHat = destandardize1D(yHatZ1d, trainMean, trainStd);
+  yHatZ1d.dispose();
+
+  const yHatArr = await yHat.data();
+  yHat.dispose();
+
+  const recMat = unflattenVec(Array.from(yHatArr), FIXED_LEN, 5);
+
+  plotReconstruction(tFixed, mat, recMat);
+}
+
+/* =========================
+   8) Event binding
+   ========================= */
+function setUI(vals) {
+  Object.keys(vals).forEach(k => {
+    if (el[k]) el[k].value = vals[k];
+  });
+  updateValueLabels();
+}
+
+function onAnyInput() {
+  updateValueLabels();
+  runCurrentODEAndPlot();
+  refreshTrajSelector();
+}
+
+ids.forEach(id => {
+  if (el[id]) el[id].addEventListener("input", onAnyInput);
+});
+
+document.getElementById("rerun").addEventListener("click", () => runCurrentODEAndPlot());
+document.getElementById("reset").addEventListener("click", () => { setUI(defaults); runCurrentODEAndPlot(); });
+
+document.getElementById("store1").addEventListener("click", () => {
+  const ui = readUI();
+  dataset1 = {
+    t1: ui.t1,
+    dt: ui.dt,
+    noiseScale: ui.noiseScale,
+    params: getODEParamsFromUI(ui),
+  };
+  updateDatasetStatus();
+  refreshTrajSelector();
+});
+
+document.getElementById("store2").addEventListener("click", () => {
+  const ui = readUI();
+  dataset2 = {
+    t1: ui.t1,
+    dt: ui.dt,
+    noiseScale: ui.noiseScale,
+    params: getODEParamsFromUI(ui),
+  };
+  updateDatasetStatus();
+  refreshTrajSelector();
+});
+
+document.getElementById("trainAE").addEventListener("click", () => trainAutoencoder());
+
+document.getElementById("whichDS").addEventListener("change", () => refreshTrajSelector());
+document.getElementById("reconstructBtn").addEventListener("click", () => reconstructOne());
+
+/* =========================
+   9) Init
+   ========================= */
+setUI(defaults);
+updateDatasetStatus();
+runCurrentODEAndPlot();
+refreshTrajSelector();
+
+// initialize reconstruction plots empty
+plotReconstruction(
+  Array.from({length: FIXED_LEN}, (_, i) => i),
+  Array.from({length: FIXED_LEN}, () => [0,0,0,0,0]),
+  Array.from({length: FIXED_LEN}, () => [0,0,0,0,0])
+);
+</script>
+</body>
+</html>

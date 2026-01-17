@@ -6,16 +6,18 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <style>
-    #map { height: 100vh; }
-    #info { position:absolute;top:10px;left:10px;background:white;padding:8px;z-index:1000;font-family:sans-serif; }
-    #startBtn { position:absolute;top:60px;left:10px;z-index:1001;padding:6px 12px; }
+    #map { height: 30vh; }
+    #info { position:absolute;top:300px;left:10px;background:white;padding:8px;z-index:1000;font-family:sans-serif; }
+    #startBtn { position:absolute;top:360px;left:10px;z-index:1001;padding:6px 12px; }
+    #testbtb { position:absolute;top:420px;left:10px;z-index:1001;padding:6px 12px; }
     .arrow { width:20px;height:20px;background:red;clip-path:polygon(50% 0%,0% 100%,100% 100%);transform-origin:50% 50%; }
   </style>
 </head>
 <body>
   <div id="info">Press Start to enable GPS + Compass</div>
   <button id="startBtn">Start</button>
-	<button onclick="startGPS()">Test GPS</button>
+    <div id="test">Press  to test</div>
+	<button id="testbtb" onclick="startGPS()">Test GPS</button>
   <div id="map"></div>
   <script>
     var map = L.map('map').setView([0,0], 2);
@@ -45,11 +47,19 @@
 
       // GPS
       if (navigator.geolocation) {
+        let firstUpdate = true;
         navigator.geolocation.watchPosition(function(pos) {
           var lat = pos.coords.latitude, lon = pos.coords.longitude;
           marker.setLatLng([lat, lon]);
-          map.setView([lat, lon], 17);
+          if (firstUpdate){
+          
+          map.setView([lat, lon], 40);
           updateInfo(lat, lon, heading);
+          firstUpdate=false;
+          }
+          else{
+          map.panTo([lat, lon]);
+          }
         }, function(err) {
           alert("Geolocation error: " + err.message);
         }, {enableHighAccuracy:true});
@@ -63,7 +73,7 @@
           heading = event.alpha;
           var pos = marker.getLatLng();
           updateInfo(pos.lat, pos.lng, heading);
-          document.getElementById("arrow").style.transform = `rotate(${heading}deg)`;
+          document.getElementById("arrow").style.transform = `rotate(${(heading-90)*-1}deg)`;
         }
       }, true);
     };

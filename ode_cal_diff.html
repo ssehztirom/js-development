@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Differentiable ODE Solver (RK4) with Trainable Parameter</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h2>Differentiable RK4 ODE Solver with Parameter Optimization</h2>
+  <canvas id="odePlot" width="600" height="400"></canvas>
+
+  <script>
+    // Define the ODE: dy/dt = -k * y, where k is trainable
+    function f(t, y, k) {
+      return y.mul(k.neg());
+    }
+
+    // Differentiable RK4 step
+    function rk4Step(y0, t0, dt, steps, k) {
+      let y = y0;
+      let t = t0;
+
+      for (let i = 0; i < steps; i++) {
+        const k1 = f(t, y, k);
+        const k2 = f(t.add(dt.div(2)), y.add(k1.mul(dt.div(2))), k);
+        const k3 = f(t.add(dt.div(2)), y.add(k2.mul(dt.div(2))), k);
+        const k4 = f(t.add(dt), y.add(k3.mul(dt)), k);
+
+        const increment = k1.add(k2.mul(2)).add(k3.mul(2)).add(k4).mul(dt.div(6));
+        y = y.add(increment);
+        t = t.add(dt);
+      }
+
+      return y;
+    }
+
+    // Simulation parameters
+    const dt = tf.scalar(0.1);
+    const steps = 10;
+    const totalSteps = 50;
+    const noiseStd = 0.2;
+    const trueK = 1.0;
+
+    // Generate noisy synthetic data
+    const times = [];
+    const noisyValues = [];
+    for (let i = 0; i < totalSteps; i++) {
+      const t = i * dt.dataSync()[0] * steps;
+      const trueVal = Math.exp(-trueK * t);
+      const noisyVal = trueVal + noiseStd * (Math.random() * 2 - 1);
+      times.push(t);
+      noisyValues.push(noisyVal);
+    }
+
+    // Define the model: simulate ODE with given k
+    function simulateODE(k) {
+      let y = tf.scalar(1.0);
+      let t = tf.scalar(0.0);
+      const preds = [];
+
+      for (let i = 0; i < totalSteps; i++) {
+        preds.push(y);
+        y = rk4Step(y, t, dt, steps, k);
+        t = t.add(dt.mul(steps));
+      }
+
+      return tf.stack(preds);
+    }
+
+    // Trainable parameter
+    const k = tf.variable(tf.scalar(0.5)); // initial guess
+
+    // Optimizer and training loop
+    const optimizer = tf.train.adam(0.05);
+
+    async function train(epochs = 10) {
+      for (let epoch = 0; epoch < epochs; epoch++) {
+        optimizer.minimize(() => {
+          const preds = simulateODE(k);
+          const labels = tf.tensor1d(noisyValues);
+          const loss = tf.losses.meanSquaredError(labels, preds);
+          console.log(`Epoch ${epoch}: loss=${loss.dataSync()[0].toFixed(6)}, k=${k.dataSync()[0].toFixed(4)}`);
+          return loss;
+        });
+        await tf.nextFrame(); // allow UI updates
+      }
+
+      // Plot results after training
+      const preds = simulateODE(k).dataSync();
+      plotResults(preds);
+    }
+
+    // Plot function
+    function plotResults(preds) {
+      const ctx = document.getElementById('odePlot').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: times,
+          datasets: [
+            {
+              label: 'Trained ODE Solution',
+              data: preds,
+              borderColor: 'blue',
+              fill: false
+            },
+            {
+              label: 'Noisy Data',
+              data: noisyValues,
+              borderColor: 'green',
+              backgroundColor: 'green',
+              showLine: false,
+              pointRadius: 4
+            },
+            {
+              label: 'True exp(-t)',
+              data: times.map(t => Math.exp(-trueK * t)),
+              borderColor: 'red',
+              borderDash: [5, 5],
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: false,
+          scales: {
+            x: { title: { display: true, text: 'Time t' } },
+            y: { title: { display: true, text: 'y(t)' } }
+          }
+        }
+      });
+    }
+    /// plotResults(simulateODE(k).dataSync());
+    train();
+  </script>
+</body>
+</html>
