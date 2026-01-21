@@ -51,6 +51,19 @@
     .status strong { color: var(--text); font-weight: 650; }
     code { background: #0f1117; padding: 1px 5px; border-radius: 6px; border: 1px solid var(--border); }
     .hr { height: 1px; background: var(--border); margin: 10px 0; }
+
+    /* =========================
+       IMPORTANT PLOTLY FIX (mobile):
+       Every Plotly target div gets an explicit height.
+       ========================= */
+    .plot .plotlyTarget {
+      width: 100%;
+      height: 260px;
+    }
+    #plot5 .plotlyTarget,
+    #recplot5 .plotlyTarget {
+      height: 320px;
+    }
   </style>
 </head>
 
@@ -177,7 +190,7 @@
         <button id="reset">Reset ODE sliders</button>
       </div>
       <div class="small">
-        Noise is added as <code>y_noisy = max(0, y + Normal(0, sd))</code> with variable-specific base sds scaled by "Noise scale".
+        Noise is added as <code>y_noisy = max(0, y + Normal(0, sd))</code> with variable-specific base sds scaled by “Noise scale”.
       </div>
     </div>
 
@@ -241,11 +254,11 @@
 
       <div class="status">
         <div>Training status: <span id="trainStatus"><strong>idle</strong></span></div>
-        <div>Final loss: <span id="trainLoss" class="mono">--</span></div>
+        <div>Final loss: <span id="trainLoss" class="mono">—</span></div>
       </div>
 
       <div class="small">
-        Standardization uses the <strong>mixed training set</strong> (Dataset1+Dataset2) mean/std per feature-dimension.<br>
+        Standardization uses the <strong>mixed training set</strong> (Dataset1+Dataset2) mean/std per feature-dimension.
         For plotting reconstructions, outputs are transformed back with the <strong>training mean/std</strong>.
       </div>
     </div>
@@ -269,51 +282,50 @@
         Trajectories are generated deterministically from the dataset snapshot using seeds <code>baseSeed + idx</code>.
       </div>
     </div>
-
   </div>
 
   <div>
     <div class="plots">
       <div class="plot">
         <div class="title">Current ODE: Lymphocytes</div>
-        <div id="plot1"></div>
+        <div id="plot1" class="plotlyTarget"></div>
       </div>
       <div class="plot">
         <div class="title">Current ODE: IL6</div>
-        <div id="plot2"></div>
+        <div id="plot2" class="plotlyTarget"></div>
       </div>
       <div class="plot">
         <div class="title">Current ODE: CRP</div>
-        <div id="plot3"></div>
+        <div id="plot3" class="plotlyTarget"></div>
       </div>
       <div class="plot">
         <div class="title">Current ODE: Iron</div>
-        <div id="plot4"></div>
+        <div id="plot4" class="plotlyTarget"></div>
       </div>
       <div class="plot" id="plot5">
         <div class="title">Current ODE: Hemoglobin</div>
-        <div id="plot5_inner"></div>
+        <div id="plot5_inner" class="plotlyTarget"></div>
       </div>
 
       <div class="plot">
         <div class="title">Reconstruction: Lymphocytes (original vs reconstructed)</div>
-        <div id="recplot1"></div>
+        <div id="recplot1" class="plotlyTarget"></div>
       </div>
       <div class="plot">
         <div class="title">Reconstruction: IL6 (original vs reconstructed)</div>
-        <div id="recplot2"></div>
+        <div id="recplot2" class="plotlyTarget"></div>
       </div>
       <div class="plot">
         <div class="title">Reconstruction: CRP (original vs reconstructed)</div>
-        <div id="recplot3"></div>
+        <div id="recplot3" class="plotlyTarget"></div>
       </div>
       <div class="plot">
         <div class="title">Reconstruction: Iron (original vs reconstructed)</div>
-        <div id="recplot4"></div>
+        <div id="recplot4" class="plotlyTarget"></div>
       </div>
       <div class="plot" id="recplot5">
         <div class="title">Reconstruction: Hemoglobin (original vs reconstructed)</div>
-        <div id="recplot5_inner"></div>
+        <div id="recplot5_inner" class="plotlyTarget"></div>
       </div>
     </div>
   </div>
@@ -332,8 +344,6 @@ function mulberry32(seed) {
     return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
   }
 }
-
-// Box-Muller using seeded RNG
 function randnFactory(rng) {
   return function randn(mean = 0, sd = 1) {
     let u = 0, v = 0;
@@ -343,8 +353,7 @@ function randnFactory(rng) {
     return mean + sd * z;
   };
 }
-
-// Requested: function to add noise (row-wise)
+// requested noise function
 function addNoiseToRow(row, noiseSds, randn) {
   const out = { t: row.t };
   for (const k of ["Lymphocytes","IL6","CRP","Iron","Hemoglobin"]) {
@@ -373,7 +382,6 @@ function rk4Step(f, t, y, dt, params) {
   return addVec(y, incr);
 }
 
-// 5D state: [L, IL6, CRP, Iron, Hb]
 function odeSystem(t, y, p) {
   let [L, IL6, CRP, Iron, Hb] = y;
 
@@ -409,27 +417,13 @@ function odeSystem(t, y, p) {
 
 function simulateTrajectory({t0, t1, dt, y0, params, noiseScale, seed}) {
   const p = {
-    // baselines
     L0: 2.0, Fe0: 100.0, Hb0: 14.5,
-
-    // forcing
     stimAmp: 1.3, stimCenter: 5.5, stimWidth: 7.0, stimRise: 0.7, stimFall: 0.7,
-
-    // IL6
     kI_prod: 18.0, kI_anemia: 0.25, kI_clear: 2.4, kI_resolve: 0.18,
-
-    // CRP
     kC_prod: 35.0, kC_clear: 1.1, KC: 10.0, nC: 2.0,
-
-    // L
     kL_recover: 0.55, kL_suppress: 0.02, wI: 0.02, wC: 0.01,
-
-    // Fe
     kFe_replete: 0.65, kFe_block: 0.02,
-
-    // Hb
     kHb_prod: 0.25, kHb_decay: 0.03, aHbI: 0.02, aHbC: 0.01,
-
     ...params,
   };
 
@@ -454,32 +448,22 @@ function simulateTrajectory({t0, t1, dt, y0, params, noiseScale, seed}) {
   const steps = Math.floor((t1 - t0) / dt);
 
   for (let i = 0; i <= steps; i++) {
-    const row = {
-      t,
-      Lymphocytes: y[0],
-      IL6: y[1],
-      CRP: y[2],
-      Iron: y[3],
-      Hemoglobin: y[4],
-    };
+    const row = { t, Lymphocytes: y[0], IL6: y[1], CRP: y[2], Iron: y[3], Hemoglobin: y[4] };
     clean.push(row);
     noisy.push(addNoiseToRow(row, noiseSds, randn));
-
     y = rk4Step(odeSystem, t, y, dt, p);
     t += dt;
   }
-
   return { clean, noisy };
 }
 
 /* =========================
    3) Resampling to fixed length
    ========================= */
-const FIXED_LEN = 200; // for the autoencoder input length (time points)
+const FIXED_LEN = 200;
 
 function lerp(a, b, w) { return a + (b - a) * w; }
 
-// linear interpolation of a scalar time series to FIXED_LEN points over [0, t1]
 function resampleSeries(tArr, yArr, t1, n = FIXED_LEN) {
   const out = new Array(n);
   const target = new Array(n);
@@ -497,26 +481,23 @@ function resampleSeries(tArr, yArr, t1, n = FIXED_LEN) {
   return { t: target, y: out };
 }
 
-// from a trajectory rows -> matrix [FIXED_LEN, 5] (noisy or clean)
 function trajectoryToMatrix(rows, t1) {
   const tArr = rows.map(r => r.t);
   const keys = ["Lymphocytes","IL6","CRP","Iron","Hemoglobin"];
+  const cols = [];
+  let tFixed = null;
 
-  const mats = [];
-  const tFixed = [];
   for (let k = 0; k < keys.length; k++) {
     const yArr = rows.map(r => r[keys[k]]);
     const rs = resampleSeries(tArr, yArr, t1, FIXED_LEN);
-    if (k === 0) tFixed.push(...rs.t);
-    mats.push(rs.y);
+    if (!tFixed) tFixed = rs.t;
+    cols.push(rs.y);
   }
 
-  // transpose to [T,5]
-  const out = Array.from({length: FIXED_LEN}, (_, i) => mats.map(col => col[i]));
-  return { tFixed, mat: out };
+  const mat = Array.from({length: FIXED_LEN}, (_, i) => cols.map(col => col[i]));
+  return { tFixed, mat };
 }
 
-// flatten [T,5] -> [T*5]
 function flattenMat(mat) {
   const out = new Array(mat.length * mat[0].length);
   let idx = 0;
@@ -533,10 +514,11 @@ function unflattenVec(vec, T = FIXED_LEN, D = 5) {
 }
 
 /* =========================
-   4) Plotting helpers
+   4) Plotting helpers (FIXED)
    ========================= */
-function commonLayout(yTitle) {
+function commonLayout(yTitle, heightPx) {
   return {
+    height: heightPx,                     // IMPORTANT
     margin: {l: 45, r: 15, t: 6, b: 38},
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
@@ -557,13 +539,16 @@ function plotCurrent(clean, noisy) {
     ["Hemoglobin", "plot5_inner", "Hemoglobin (arb)"],
   ];
   keys.forEach(([key, divId, yTitle]) => {
+    const div = document.getElementById(divId);
+    const h = Math.max(200, div?.clientHeight || 260);
+
     const cleanY = clean.map(r => r[key]);
     const noisyY = noisy.map(r => r[key]);
     const traces = [
       {x: xs, y: cleanY, name: "clean", mode: "lines", line: {width: 2}},
       {x: xs, y: noisyY, name: "noisy", mode: "markers", marker: {size: 4, opacity: 0.7}},
     ];
-    Plotly.react(divId, traces, commonLayout(yTitle), {displayModeBar: false, responsive: true});
+    Plotly.react(divId, traces, commonLayout(yTitle, h), {displayModeBar: false, responsive: true});
   });
 }
 
@@ -576,11 +561,14 @@ function plotReconstruction(tFixed, origMat, recMat) {
     ["Hemoglobin", 4, "recplot5_inner", "Hemoglobin (arb)"],
   ];
   keys.forEach(([name, j, divId, yTitle]) => {
+    const div = document.getElementById(divId);
+    const h = Math.max(200, div?.clientHeight || 260);
+
     const traces = [
       {x: tFixed, y: origMat.map(r => r[j]), name: "original", mode: "lines", line: {width: 2}},
       {x: tFixed, y: recMat.map(r => r[j]), name: "reconstructed", mode: "lines", line: {width: 2, dash: "dot"}},
     ];
-    Plotly.react(divId, traces, commonLayout(yTitle), {displayModeBar: false, responsive: true});
+    Plotly.react(divId, traces, commonLayout(yTitle, h), {displayModeBar: false, responsive: true});
   });
 }
 
@@ -601,7 +589,10 @@ const defaults = {
 
 const ids = Object.keys(defaults);
 const el = {};
-ids.forEach(id => { el[id] = document.getElementById(id); el[id + "_val"] = document.getElementById(id + "_val"); });
+ids.forEach(id => {
+  el[id] = document.getElementById(id);
+  el[id + "_val"] = document.getElementById(id + "_val");
+});
 
 function updateValueLabels() {
   ids.forEach(id => {
@@ -618,9 +609,7 @@ function updateValueLabels() {
 
 function readUI() {
   const v = {};
-  ids.forEach(id => {
-    if (el[id]) v[id] = parseFloat(el[id].value);
-  });
+  ids.forEach(id => { if (el[id]) v[id] = parseFloat(el[id].value); });
   return v;
 }
 
@@ -641,7 +630,6 @@ function getODEParamsFromUI(ui) {
 function runCurrentODEAndPlot() {
   const ui = readUI();
   const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
-
   const traj = simulateTrajectory({
     t0: 0, t1: ui.t1, dt: ui.dt,
     y0,
@@ -649,7 +637,6 @@ function runCurrentODEAndPlot() {
     noiseScale: ui.noiseScale,
     seed: Math.floor(ui.seed),
   });
-
   plotCurrent(traj.clean, traj.noisy);
   return traj;
 }
@@ -660,17 +647,13 @@ function runCurrentODEAndPlot() {
 let dataset1 = null;
 let dataset2 = null;
 
-// Per-dataset mean/sd (optional bookkeeping, as you requested)
 let ds1Stats = null;
 let ds2Stats = null;
 
-// Training mean/sd (used for standardize/invert in the AE)
-let trainMean = null; // Float32Array length inputDim
-let trainStd  = null; // Float32Array length inputDim
+let trainMean = null;
+let trainStd  = null;
 
 function computeDatasetStats(snapshot, nTraj, baseSeed) {
-  // Compute mean/sd over flattened vectors for this dataset snapshot (noisy trajectories).
-  // Returns {mean, sd} as Float32Array length inputDim
   const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
   const inputDim = FIXED_LEN * 5;
   const all = [];
@@ -688,7 +671,6 @@ function computeDatasetStats(snapshot, nTraj, baseSeed) {
     all.push(flattenMat(mat));
   }
 
-  // mean/std in JS (safe for small-ish n)
   const mean = new Float32Array(inputDim);
   const sd = new Float32Array(inputDim);
 
@@ -738,7 +720,6 @@ let aeModel = null;
 let aeInputDim = FIXED_LEN * 5;
 
 function buildAutoencoder(inputDim, latentDim) {
-  // A simple dense AE on flattened trajectories
   const input = tf.input({shape: [inputDim]});
   const enc1 = tf.layers.dense({units: 256, activation: "relu"}).apply(input);
   const enc2 = tf.layers.dense({units: 64, activation: "relu"}).apply(enc1);
@@ -754,7 +735,6 @@ function buildAutoencoder(inputDim, latentDim) {
 }
 
 function standardizeTensor2D(x2d, meanArr, stdArr) {
-  // x2d: [N, D]
   const mean = tf.tensor1d(meanArr);
   const std = tf.tensor1d(stdArr);
   const z = x2d.sub(mean).div(std);
@@ -777,15 +757,13 @@ async function makeTrainingData() {
   const n1 = parseInt(ui.nTraj1, 10);
   const n2 = parseInt(ui.nTraj2, 10);
 
-  if ((!dataset1 && n1 > 0) || (!dataset2 && n2 > 0)) {
-    throw new Error("You requested trajectories from a dataset that isn't stored.");
-  }
+  if ((!dataset1 && n1 > 0) || (!dataset2 && n2 > 0)) throw new Error("You requested trajectories from a dataset that isn't stored.");
   const total = n1 + n2;
   if (total <= 0) throw new Error("Set #trajectories > 0 for training.");
 
   const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
   const X = [];
-  // helper: add trajectories from a snapshot
+
   function addFromSnapshot(snapshot, n, baseSeed) {
     for (let i = 0; i < n; i++) {
       const seed = baseSeed + i;
@@ -807,13 +785,10 @@ async function makeTrainingData() {
 
   const x2d = tf.tensor2d(X, [X.length, aeInputDim], "float32");
 
-  // compute training mean/std (per feature dimension) on the mixed training set
   const {mean, variance} = tf.moments(x2d, 0);
   const std = tf.sqrt(variance.add(tf.scalar(1e-6)));
-
   trainMean = await mean.data();
   trainStd  = await std.data();
-
   mean.dispose(); variance.dispose(); std.dispose();
 
   const z2d = standardizeTensor2D(x2d, trainMean, trainStd);
@@ -826,7 +801,7 @@ async function trainAutoencoder() {
   const statusEl = document.getElementById("trainStatus");
   const lossEl = document.getElementById("trainLoss");
   statusEl.innerHTML = "<strong>preparing data…</strong>";
-  lossEl.textContent = "--";
+  lossEl.textContent = "—";
 
   const ui = readUI();
   const latentDim = parseInt(ui.latentDim, 10);
@@ -836,14 +811,10 @@ async function trainAutoencoder() {
   try {
     const { z2d, n } = await makeTrainingData();
 
-    // (Optional bookkeeping): compute per-dataset mean/sd too (small sample)
-    // This is separate from trainMean/trainStd, and not used for AE scaling.
-    // You asked to track them for the two datasets.
     statusEl.innerHTML = `<strong>computing dataset stats…</strong>`;
     if (dataset1) ds1Stats = computeDatasetStats(dataset1, Math.min(20, parseInt(el.nTraj1.value,10) || 20), Math.floor(ui.seed)+30000);
     if (dataset2) ds2Stats = computeDatasetStats(dataset2, Math.min(20, parseInt(el.nTraj2.value,10) || 20), Math.floor(ui.seed)+40000);
 
-    // build model
     if (aeModel) { aeModel.dispose(); aeModel = null; }
     aeModel = buildAutoencoder(aeInputDim, latentDim);
 
@@ -865,7 +836,10 @@ async function trainAutoencoder() {
 
     z2d.dispose();
     statusEl.innerHTML = "<strong>done</strong>";
-    lossEl.textContent = (lastLoss == null) ? "--" : Number(lastLoss).toExponential(6);
+    lossEl.textContent = (lastLoss == null) ? "—" : Number(lastLoss).toExponential(6);
+
+    // after training, resize once (helps mobile)
+    setTimeout(resizeAllPlots, 50);
 
   } catch (err) {
     statusEl.innerHTML = `<strong>error</strong>`;
@@ -878,26 +852,16 @@ async function reconstructOne() {
   const which = document.getElementById("whichDS").value;
   const idx = parseInt(document.getElementById("whichTraj").value, 10);
 
-  if (!aeModel) {
-    alert("Train the autoencoder first.");
-    return;
-  }
-  if (!trainMean || !trainStd) {
-    alert("Missing training mean/std. Train again.");
-    return;
-  }
+  if (!aeModel) { alert("Train the autoencoder first."); return; }
+  if (!trainMean || !trainStd) { alert("Missing training mean/std. Train again."); return; }
 
   const snap = (which === "1") ? dataset1 : dataset2;
-  if (!snap) {
-    alert("Selected dataset not stored.");
-    return;
-  }
+  if (!snap) { alert("Selected dataset not stored."); return; }
 
   const ui = readUI();
   const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
   const seed = Math.floor(ui.seed) + (which === "1" ? 10000 : 20000) + idx;
 
-  // generate one noisy trajectory
   const tr = simulateTrajectory({
     t0: 0, t1: snap.t1, dt: snap.dt,
     y0,
@@ -909,7 +873,6 @@ async function reconstructOne() {
   const { tFixed, mat } = trajectoryToMatrix(tr.noisy, snap.t1);
   const xVec = flattenMat(mat);
 
-  // standardize with TRAINING mean/std, run AE, inverse-transform
   const x = tf.tensor2d([xVec], [1, aeInputDim], "float32");
   const z = standardizeTensor2D(x, trainMean, trainStd);
   x.dispose();
@@ -917,7 +880,6 @@ async function reconstructOne() {
   const yHatZ = aeModel.predict(z);
   z.dispose();
 
-  // yHatZ is a Tensor [1, D]
   const yHatZ1d = yHatZ.squeeze();
   yHatZ.dispose();
 
@@ -928,17 +890,17 @@ async function reconstructOne() {
   yHat.dispose();
 
   const recMat = unflattenVec(Array.from(yHatArr), FIXED_LEN, 5);
-
   plotReconstruction(tFixed, mat, recMat);
+
+  // resize once more (mobile)
+  setTimeout(resizeAllPlots, 50);
 }
 
 /* =========================
    8) Event binding
    ========================= */
 function setUI(vals) {
-  Object.keys(vals).forEach(k => {
-    if (el[k]) el[k].value = vals[k];
-  });
+  Object.keys(vals).forEach(k => { if (el[k]) el[k].value = vals[k]; });
   updateValueLabels();
 }
 
@@ -946,58 +908,61 @@ function onAnyInput() {
   updateValueLabels();
   runCurrentODEAndPlot();
   refreshTrajSelector();
+  // defer resize slightly on mobile
+  setTimeout(resizeAllPlots, 50);
 }
 
-ids.forEach(id => {
-  if (el[id]) el[id].addEventListener("input", onAnyInput);
-});
+ids.forEach(id => { if (el[id]) el[id].addEventListener("input", onAnyInput); });
 
-document.getElementById("rerun").addEventListener("click", () => runCurrentODEAndPlot());
-document.getElementById("reset").addEventListener("click", () => { setUI(defaults); runCurrentODEAndPlot(); });
+document.getElementById("rerun").addEventListener("click", () => { runCurrentODEAndPlot(); setTimeout(resizeAllPlots, 50); });
+document.getElementById("reset").addEventListener("click", () => { setUI(defaults); runCurrentODEAndPlot(); setTimeout(resizeAllPlots, 50); });
 
 document.getElementById("store1").addEventListener("click", () => {
   const ui = readUI();
-  dataset1 = {
-    t1: ui.t1,
-    dt: ui.dt,
-    noiseScale: ui.noiseScale,
-    params: getODEParamsFromUI(ui),
-  };
+  dataset1 = { t1: ui.t1, dt: ui.dt, noiseScale: ui.noiseScale, params: getODEParamsFromUI(ui) };
   updateDatasetStatus();
   refreshTrajSelector();
 });
 
 document.getElementById("store2").addEventListener("click", () => {
   const ui = readUI();
-  dataset2 = {
-    t1: ui.t1,
-    dt: ui.dt,
-    noiseScale: ui.noiseScale,
-    params: getODEParamsFromUI(ui),
-  };
+  dataset2 = { t1: ui.t1, dt: ui.dt, noiseScale: ui.noiseScale, params: getODEParamsFromUI(ui) };
   updateDatasetStatus();
   refreshTrajSelector();
 });
 
 document.getElementById("trainAE").addEventListener("click", () => trainAutoencoder());
-
 document.getElementById("whichDS").addEventListener("change", () => refreshTrajSelector());
 document.getElementById("reconstructBtn").addEventListener("click", () => reconstructOne());
 
 /* =========================
-   9) Init
+   9) Plot resize helpers (mobile)
+   ========================= */
+function resizeAllPlots() {
+  const ids = ["plot1","plot2","plot3","plot4","plot5_inner","recplot1","recplot2","recplot3","recplot4","recplot5_inner"];
+  ids.forEach(id => {
+    const d = document.getElementById(id);
+    if (d && d.data) Plotly.Plots.resize(d);
+  });
+}
+window.addEventListener("resize", () => setTimeout(resizeAllPlots, 80));
+window.addEventListener("orientationchange", () => setTimeout(resizeAllPlots, 200));
+
+/* =========================
+   10) Init
    ========================= */
 setUI(defaults);
 updateDatasetStatus();
 runCurrentODEAndPlot();
 refreshTrajSelector();
 
-// initialize reconstruction plots empty
+// initialize reconstruction plots empty but sized
 plotReconstruction(
   Array.from({length: FIXED_LEN}, (_, i) => i),
   Array.from({length: FIXED_LEN}, () => [0,0,0,0,0]),
   Array.from({length: FIXED_LEN}, () => [0,0,0,0,0])
 );
+setTimeout(resizeAllPlots, 80);
 </script>
 </body>
 </html>
