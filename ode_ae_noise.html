@@ -1,828 +1,1220 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>ODE + Plain Dense Autoencoder (patients as minibatches, variable L, no LSTM)</title>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>ODE + Plain Dense Autoencoder (patients as minibatches, variable L, no LSTM)</title>
 
-  <!-- Plotly + TensorFlow.js -->
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+	<!-- Plotly + TensorFlow.js -->
+	<script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
 
-  <style>
-    :root { --gap: 12px; --bg:#0b0c10; --panel:#12141a; --text:#e9eef6; --muted:#aab3c2; --border:#2a2f3a; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:var(--text); }
-    header { padding:14px 16px; border-bottom:1px solid var(--border); background:#0f1117; }
-    header h1 { margin:0 0 4px 0; font-size:16px; font-weight:650; }
-    header p { margin:0; font-size:12px; color:var(--muted); }
+	<style>
+		:root {
+			--gap: 12px;
+			--bg: #0b0c10;
+			--panel: #12141a;
+			--text: #e9eef6;
+			--muted: #aab3c2;
+			--border: #2a2f3a;
+		}
 
-    .wrap { display:grid; grid-template-columns: 460px 1fr; gap:var(--gap); padding:var(--gap); }
-    @media (max-width:1100px){ .wrap{ grid-template-columns:1fr; } }
+		body {
+			margin: 0;
+			font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+			background: var(--bg);
+			color: var(--text);
+		}
 
-    .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; }
-    .panel h2 { margin:0 0 10px 0; font-size:14px; font-weight:650; }
-    .panel h3 { margin:10px 0 6px 0; font-size:12px; font-weight:650; color:var(--muted); }
-    .group { border-top:1px solid var(--border); margin-top:10px; padding-top:10px; }
+		header {
+			padding: 14px 16px;
+			border-bottom: 1px solid var(--border);
+			background: #0f1117;
+		}
 
-    .row { display:grid; grid-template-columns:1fr 92px; gap:10px; align-items:center; margin:10px 0; }
-    label { display:block; margin-bottom:4px; font-size:12px; color:var(--muted); }
-    input[type="range"] { width:100%; }
-    .val { text-align:right; font-size:12px; font-variant-numeric: tabular-nums; }
+		header h1 {
+			margin: 0 0 4px 0;
+			font-size: 16px;
+			font-weight: 650;
+		}
 
-    .btns { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
-    button, select {
-      cursor:pointer; border:1px solid var(--border); background:#1a1f2b; color:var(--text);
-      padding:9px 10px; border-radius:8px; font-size:12px;
-    }
-    button:hover { background:#22293a; }
-    select { padding:8px 10px; }
+		header p {
+			margin: 0;
+			font-size: 12px;
+			color: var(--muted);
+		}
 
-    .plots { display:grid; grid-template-columns:1fr 1fr; gap:var(--gap); }
-    @media (max-width:1100px){ .plots{ grid-template-columns:1fr; } }
-    .plot { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:8px; }
-    .plot .title { font-size:12px; color:var(--muted); margin:2px 4px 6px 4px; }
-    #plot5, #recplot5 { grid-column: 1 / -1; }
+		.wrap {
+			display: grid;
+			grid-template-columns: 460px 1fr;
+			gap: var(--gap);
+			padding: var(--gap);
+		}
 
-    /* Plotly mobile fix: explicit heights */
-    .plot .plotlyTarget { width:100%; height:260px; }
-    #plot5 .plotlyTarget, #recplot5 .plotlyTarget { height:320px; }
+		@media (max-width:1100px) {
+			.wrap {
+				grid-template-columns: 1fr;
+			}
+		}
 
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-    .small { font-size:11px; color:var(--muted); line-height:1.35; }
-    .status { margin-top:8px; font-size:12px; color:var(--muted); }
-    .status strong { color:var(--text); font-weight:650; }
-    code { background:#0f1117; border:1px solid var(--border); padding:1px 5px; border-radius:6px; }
-    .hr { height:1px; background:var(--border); margin:10px 0; }
-  </style>
+		.panel {
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			padding: 12px;
+		}
+
+		.panel h2 {
+			margin: 0 0 10px 0;
+			font-size: 14px;
+			font-weight: 650;
+		}
+
+		.panel h3 {
+			margin: 10px 0 6px 0;
+			font-size: 12px;
+			font-weight: 650;
+			color: var(--muted);
+		}
+
+		.group {
+			border-top: 1px solid var(--border);
+			margin-top: 10px;
+			padding-top: 10px;
+		}
+
+		.row {
+			display: grid;
+			grid-template-columns: 1fr 92px;
+			gap: 10px;
+			align-items: center;
+			margin: 10px 0;
+		}
+
+		label {
+			display: block;
+			margin-bottom: 4px;
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		input[type="range"] {
+			width: 100%;
+		}
+
+		.val {
+			text-align: right;
+			font-size: 12px;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.btns {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 10px;
+			margin-top: 10px;
+		}
+
+		button,
+		select {
+			cursor: pointer;
+			border: 1px solid var(--border);
+			background: #1a1f2b;
+			color: var(--text);
+			padding: 9px 10px;
+			border-radius: 8px;
+			font-size: 12px;
+		}
+
+		button:hover {
+			background: #22293a;
+		}
+
+		select {
+			padding: 8px 10px;
+		}
+
+		.plots {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			gap: var(--gap);
+		}
+
+		@media (max-width:1100px) {
+			.plots {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		.plot {
+			background: var(--panel);
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			padding: 8px;
+		}
+
+		.plot .title {
+			font-size: 12px;
+			color: var(--muted);
+			margin: 2px 4px 6px 4px;
+		}
+
+		#plot5,
+		#recplot5 {
+			grid-column: 1 / -1;
+		}
+
+		/* Plotly mobile fix: explicit heights */
+		.plot .plotlyTarget {
+			width: 100%;
+			height: 260px;
+		}
+
+		#plot5 .plotlyTarget,
+		#recplot5 .plotlyTarget {
+			height: 320px;
+		}
+
+		.mono {
+			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+		}
+
+		.small {
+			font-size: 11px;
+			color: var(--muted);
+			line-height: 1.35;
+		}
+
+		.status {
+			margin-top: 8px;
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		.status strong {
+			color: var(--text);
+			font-weight: 650;
+		}
+
+		code {
+			background: #0f1117;
+			border: 1px solid var(--border);
+			padding: 1px 5px;
+			border-radius: 6px;
+		}
+
+		.hr {
+			height: 1px;
+			background: var(--border);
+			margin: 10px 0;
+		}
+	</style>
 </head>
 
 <body>
-<header>
-  <h1>ODE + Plain Dense Autoencoder</h1>
-  <p>
-    Input dimension is <strong>D = 5 + nExtraNoise</strong>. Each patient provides a matrix <code>[L, D]</code>.
-    Training minibatches are patients: <code>trainOnBatch(X_patient, X_patient)</code>. No LSTM; time is not explicit.
-  </p>
-</header>
+	<header>
+		<h1>ODE + Plain Dense Autoencoder</h1>
+		<p>
+			Input dimension is <strong>D = 5 + nExtraNoise</strong>. Each patient provides a matrix <code>[L, D]</code>.
+			Training minibatches are patients: <code>trainOnBatch(X_patient, X_patient)</code>. No LSTM; time is not explicit.
+		</p>
+	</header>
 
-<div class="wrap">
-  <div class="panel">
-    <h2>ODE controls</h2>
+	<div class="wrap">
+		<div class="panel">
+			<h2>ODE controls</h2>
 
-    <div class="row">
-      <div><label for="t1">Duration (days)</label><input id="t1" type="range" min="7" max="120" step="1" value="28"></div>
-      <div class="val" id="t1_val"></div>
-    </div>
-    <div class="row">
-      <div><label for="dt">Integrator dt (days)</label><input id="dt" type="range" min="0.02" max="0.5" step="0.01" value="0.1"></div>
-      <div class="val" id="dt_val"></div>
-    </div>
+			<div class="row">
+				<div><label for="t1">Duration (days)</label><input id="t1" type="range" min="7" max="120" step="1" value="28"></div>
+				<div class="val" id="t1_val"></div>
+			</div>
+			<div class="row">
+				<div><label for="dt">Integrator dt (days)</label><input id="dt" type="range" min="0.02" max="0.5" step="0.01" value="0.1"></div>
+				<div class="val" id="dt_val"></div>
+			</div>
 
-    <div class="group">
-      <h3>Stimulus</h3>
-      <div class="row">
-        <div><label for="stimAmp">stimAmp</label><input id="stimAmp" type="range" min="0" max="3" step="0.05" value="1.3"></div>
-        <div class="val" id="stimAmp_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="stimCenter">stimCenter</label><input id="stimCenter" type="range" min="0" max="60" step="0.5" value="5.5"></div>
-        <div class="val" id="stimCenter_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="stimWidth">stimWidth</label><input id="stimWidth" type="range" min="0.5" max="30" step="0.5" value="7"></div>
-        <div class="val" id="stimWidth_val"></div>
-      </div>
-    </div>
+			<div class="group">
+				<h3>Stimulus</h3>
+				<div class="row">
+					<div><label for="stimAmp">stimAmp</label><input id="stimAmp" type="range" min="0" max="3" step="0.05" value="1.3"></div>
+					<div class="val" id="stimAmp_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="stimCenter">stimCenter</label><input id="stimCenter" type="range" min="0" max="60" step="0.5" value="5.5"></div>
+					<div class="val" id="stimCenter_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="stimWidth">stimWidth</label><input id="stimWidth" type="range" min="0.5" max="30" step="0.5" value="7"></div>
+					<div class="val" id="stimWidth_val"></div>
+				</div>
+			</div>
 
-    <div class="group">
-      <h3>Selected dynamics</h3>
-      <div class="row">
-        <div><label for="kI_prod">kI_prod</label><input id="kI_prod" type="range" min="0" max="60" step="0.5" value="18"></div>
-        <div class="val" id="kI_prod_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="kI_clear">kI_clear</label><input id="kI_clear" type="range" min="0.1" max="6" step="0.05" value="2.4"></div>
-        <div class="val" id="kI_clear_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="kC_prod">kC_prod</label><input id="kC_prod" type="range" min="0" max="80" step="0.5" value="35"></div>
-        <div class="val" id="kC_prod_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="kC_clear">kC_clear</label><input id="kC_clear" type="range" min="0.05" max="4" step="0.05" value="1.1"></div>
-        <div class="val" id="kC_clear_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="kFe_block">kFe_block</label><input id="kFe_block" type="range" min="0" max="0.08" step="0.001" value="0.02"></div>
-        <div class="val" id="kFe_block_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="kHb_prod">kHb_prod</label><input id="kHb_prod" type="range" min="0" max="1" step="0.01" value="0.25"></div>
-        <div class="val" id="kHb_prod_val"></div>
-      </div>
-    </div>
+			<div class="group">
+				<h3>Selected dynamics</h3>
+				<div class="row">
+					<div><label for="kI_prod">kI_prod</label><input id="kI_prod" type="range" min="0" max="60" step="0.5" value="18"></div>
+					<div class="val" id="kI_prod_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="kI_clear">kI_clear</label><input id="kI_clear" type="range" min="0.1" max="6" step="0.05" value="2.4"></div>
+					<div class="val" id="kI_clear_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="kC_prod">kC_prod</label><input id="kC_prod" type="range" min="0" max="80" step="0.5" value="35"></div>
+					<div class="val" id="kC_prod_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="kC_clear">kC_clear</label><input id="kC_clear" type="range" min="0.05" max="4" step="0.05" value="1.1"></div>
+					<div class="val" id="kC_clear_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="kFe_block">kFe_block</label><input id="kFe_block" type="range" min="0" max="0.08" step="0.001" value="0.02"></div>
+					<div class="val" id="kFe_block_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="kHb_prod">kHb_prod</label><input id="kHb_prod" type="range" min="0" max="1" step="0.01" value="0.25"></div>
+					<div class="val" id="kHb_prod_val"></div>
+				</div>
+			</div>
 
-    <div class="group">
-      <h3>Patients</h3>
-      <div class="row">
-        <div><label for="minObs">Min observations / patient</label><input id="minObs" type="range" min="5" max="200" step="1" value="25"></div>
-        <div class="val" id="minObs_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="maxObs">Max observations / patient</label><input id="maxObs" type="range" min="10" max="300" step="1" value="60"></div>
-        <div class="val" id="maxObs_val"></div>
-      </div>
-      <div class="small">
-        Patient i produces <code>L_i</code> observations with <code>L_i ∈ [minObs, maxObs]</code>. Each patient is trained as its own minibatch <code>[L_i, D]</code>.
-      </div>
-    </div>
+			<div class="group">
+				<h3>Patients</h3>
+				<div class="row">
+					<div><label for="minObs">Min observations / patient</label><input id="minObs" type="range" min="3" max="200" step="1" value="25"></div>
+					<div class="val" id="minObs_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="maxObs">Max observations / patient</label><input id="maxObs" type="range" min="5" max="300" step="1" value="60"></div>
+					<div class="val" id="maxObs_val"></div>
+				</div>
+				<div class="small">
+					Patient i produces <code>L_i</code> observations with <code>L_i ∈ [minObs, maxObs]</code>. Each patient is trained as its own minibatch <code>[L_i, D]</code>.
+				</div>
+			</div>
 
-    <div class="group">
-      <h3>Noise</h3>
-      <div class="row">
-        <div><label for="noiseScale">Measurement noise scale (5 vars)</label><input id="noiseScale" type="range" min="0" max="3" step="0.05" value="1"></div>
-        <div class="val" id="noiseScale_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="nExtraNoise"># extra noise vars (0..20)</label><input id="nExtraNoise" type="range" min="0" max="20" step="1" value="0"></div>
-        <div class="val" id="nExtraNoise_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="extraNoiseSD">Extra noise SD (zero-mean)</label><input id="extraNoiseSD" type="range" min="0" max="5" step="0.05" value="1"></div>
-        <div class="val" id="extraNoiseSD_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="seed">Base seed</label><input id="seed" type="range" min="1" max="9999" step="1" value="1234"></div>
-        <div class="val" id="seed_val"></div>
-      </div>
-      <div class="btns">
-        <button id="rerun">Rerun current ODE</button>
-        <button id="reset">Reset sliders</button>
-      </div>
-    </div>
+			<div class="group">
+				<h3>Noise</h3>
+				<div class="row">
+					<div><label for="noiseScale">Measurement noise scale (5 vars)</label><input id="noiseScale" type="range" min="0" max="3" step="0.05" value="1"></div>
+					<div class="val" id="noiseScale_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="nExtraNoise"># extra noise vars (0..20)</label><input id="nExtraNoise" type="range" min="0" max="20" step="1" value="5"></div>
+					<div class="val" id="nExtraNoise_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="extraNoiseSD">Extra noise SD (zero-mean)</label><input id="extraNoiseSD" type="range" min="0" max="5" step="0.05" value="1"></div>
+					<div class="val" id="extraNoiseSD_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="seed">Base seed</label><input id="seed" type="range" min="1" max="9999" step="1" value="1234"></div>
+					<div class="val" id="seed_val"></div>
+				</div>
+				<div class="btns">
+					<button id="rerun">Rerun current ODE</button>
+					<button id="reset">Reset sliders</button>
+				</div>
+			</div>
 
-    <div class="hr"></div>
+			<div class="hr"></div>
 
-    <h2>Dataset builder</h2>
-    <div class="btns">
-      <button id="store1">Store current sliders as Dataset 1</button>
-      <button id="store2">Store current sliders as Dataset 2</button>
-    </div>
-    <div class="status" id="dsStatus">
-      Dataset 1: <strong>not stored</strong><br>
-      Dataset 2: <strong>not stored</strong>
-    </div>
+			<h2>Dataset builder</h2>
+			<div class="btns">
+				<button id="store1">Store current sliders as Dataset 1</button>
+				<button id="store2">Store current sliders as Dataset 2</button>
+			</div>
+			<div class="status" id="dsStatus">
+				Dataset 1: <strong>not stored</strong><br>
+				Dataset 2: <strong>not stored</strong>
+			</div>
 
-    <div class="group">
-      <h3>Training mixture</h3>
-      <div class="row">
-        <div><label for="nPatients1"># patients from Dataset 1</label><input id="nPatients1" type="range" min="0" max="400" step="1" value="80"></div>
-        <div class="val" id="nPatients1_val"></div>
-      </div>
-      <div class="row">
-        <div><label for="nPatients2"># patients from Dataset 2</label><input id="nPatients2" type="range" min="0" max="400" step="1" value="80"></div>
-        <div class="val" id="nPatients2_val"></div>
-      </div>
+			<div class="group">
+				<h3>Training mixture</h3>
+				<div class="row">
+					<div><label for="nPatients1"># patients from Dataset 1</label><input id="nPatients1" type="range" min="0" max="400" step="1" value="80"></div>
+					<div class="val" id="nPatients1_val"></div>
+				</div>
+				<div class="row">
+					<div><label for="nPatients2"># patients from Dataset 2</label><input id="nPatients2" type="range" min="0" max="400" step="1" value="80"></div>
+					<div class="val" id="nPatients2_val"></div>
+				</div>
 
-      <div class="row">
-        <div><label for="latentDim">Latent dim</label><input id="latentDim" type="range" min="2" max="128" step="1" value="16"></div>
-        <div class="val" id="latentDim_val"></div>
-      </div>
+				<div class="row">
+					<div><label for="latentDim">Latent dim</label><input id="latentDim" type="range" min="2" max="128" step="1" value="2"></div>
+					<div class="val" id="latentDim_val"></div>
+				</div>
 
-      <div class="row">
-        <div><label for="epochs">Epochs</label><input id="epochs" type="range" min="1" max="200" step="1" value="60"></div>
-        <div class="val" id="epochs_val"></div>
-      </div>
+				<div class="row">
+					<div><label for="epochs">Epochs</label><input id="epochs" type="range" min="1" max="200" step="1" value="60"></div>
+					<div class="val" id="epochs_val"></div>
+				</div>
 
-      <div class="status small">
-        Training input dim: <span class="mono" id="dimText">—</span>
-      </div>
+				<div class="status small">
+					Training input dim: <span class="mono" id="dimText">—</span>
+				</div>
 
-      <div class="btns">
-        <button id="trainAE">Train autoencoder</button>
-      </div>
-      <div class="status">
-        <div>Training status: <span id="trainStatus"><strong>idle</strong></span></div>
-        <div>Final loss: <span id="trainLoss" class="mono">—</span></div>
-      </div>
+				<div class="btns">
+					<button id="trainAE">Train autoencoder</button>
+				</div>
+				<div class="status">
+					<div>Training status: <span id="trainStatus"><strong>idle</strong></span></div>
+					<div>Final loss: <span id="trainLoss" class="mono">—</span></div>
+				</div>
 
-      <div class="small">
-        Standardization: mean/std computed per feature across all observations from all training patients (both datasets),
-        then applied before training. Reconstruction is inverse-standardized for plotting.
-      </div>
-    </div>
+				<div class="small">
+					Standardization: mean/std computed per feature across all observations from all training patients (both datasets),
+					then applied before training. Reconstruction is inverse-standardized for plotting.
+				</div>
+			</div>
 
-    <div class="group">
-      <h3>Reconstruct one patient</h3>
-      <div class="btns">
-        <select id="whichDS">
-          <option value="1">Dataset 1</option>
-          <option value="2">Dataset 2</option>
-        </select>
-        <select id="whichPatient"><option value="0">Patient #0</option></select>
-        <button id="reconstructBtn">Reconstruct</button>
-      </div>
-    </div>
-  </div>
+			<div class="group">
+				<h3>Reconstruct one patient</h3>
+				<div class="btns">
+					<select id="whichDS">
+						<option value="1">Dataset 1</option>
+						<option value="2">Dataset 2</option>
+					</select>
+					<select id="whichPatient">
+						<option value="0">Patient #0</option>
+					</select>
+					<button id="reconstructBtn">Reconstruct</button>
+				</div>
+			</div>
+		</div>
 
-  <div>
-    <div class="plots">
-      <div class="plot"><div class="title">Current ODE: Lymphocytes</div><div id="plot1" class="plotlyTarget"></div></div>
-      <div class="plot"><div class="title">Current ODE: IL6</div><div id="plot2" class="plotlyTarget"></div></div>
-      <div class="plot"><div class="title">Current ODE: CRP</div><div id="plot3" class="plotlyTarget"></div></div>
-      <div class="plot"><div class="title">Current ODE: Iron</div><div id="plot4" class="plotlyTarget"></div></div>
-      <div class="plot" id="plot5"><div class="title">Current ODE: Hemoglobin</div><div id="plot5_inner" class="plotlyTarget"></div></div>
+		<div>
+			<div class="plots">
+				<div class="plot">
+					<div class="title">Current ODE: Lymphocytes</div>
+					<div id="plot1" class="plotlyTarget"></div>
+				</div>
+				<div class="plot">
+					<div class="title">Current ODE: IL6</div>
+					<div id="plot2" class="plotlyTarget"></div>
+				</div>
+				<div class="plot">
+					<div class="title">Current ODE: CRP</div>
+					<div id="plot3" class="plotlyTarget"></div>
+				</div>
+				<div class="plot">
+					<div class="title">Current ODE: Iron</div>
+					<div id="plot4" class="plotlyTarget"></div>
+				</div>
+				<div class="plot" id="plot5">
+					<div class="title">Current ODE: Hemoglobin</div>
+					<div id="plot5_inner" class="plotlyTarget"></div>
+				</div>
 
-      <div class="plot"><div class="title">Reconstruction: Lymphocytes</div><div id="recplot1" class="plotlyTarget"></div></div>
-      <div class="plot"><div class="title">Reconstruction: IL6</div><div id="recplot2" class="plotlyTarget"></div></div>
-      <div class="plot"><div class="title">Reconstruction: CRP</div><div id="recplot3" class="plotlyTarget"></div></div>
-      <div class="plot"><div class="title">Reconstruction: Iron</div><div id="recplot4" class="plotlyTarget"></div></div>
-      <div class="plot" id="recplot5"><div class="title">Reconstruction: Hemoglobin</div><div id="recplot5_inner" class="plotlyTarget"></div></div>
-    </div>
-  </div>
-</div>
+				<div class="plot">
+					<div class="title">Reconstruction: Lymphocytes</div>
+					<div id="recplot1" class="plotlyTarget"></div>
+				</div>
+				<div class="plot">
+					<div class="title">Reconstruction: IL6</div>
+					<div id="recplot2" class="plotlyTarget"></div>
+				</div>
+				<div class="plot">
+					<div class="title">Reconstruction: CRP</div>
+					<div id="recplot3" class="plotlyTarget"></div>
+				</div>
+				<div class="plot">
+					<div class="title">Reconstruction: Iron</div>
+					<div id="recplot4" class="plotlyTarget"></div>
+				</div>
+				<div class="plot" id="recplot5">
+					<div class="title">Reconstruction: Hemoglobin</div>
+					<div id="recplot5_inner" class="plotlyTarget"></div>
+				</div>
+			</div>
+		</div>
+	</div>
 
-<script>
-/* =========================
+	<script>
+		/* =========================
    RNG
    ========================= */
-function mulberry32(seed) {
-  let t = seed >>> 0;
-  return function() {
-    t += 0x6D2B79F5;
-    let x = Math.imul(t ^ (t >>> 15), 1 | t);
-    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  }
-}
-function randnFactory(rng) {
-  return function(mean = 0, sd = 1) {
-    let u = 0, v = 0;
-    while (u === 0) u = rng();
-    while (v === 0) v = rng();
-    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    return mean + sd * z;
-  };
-}
-
-/* =========================
-   ODE + RK4
-   ========================= */
-function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
-function addVec(a, b) { return a.map((v, i) => v + b[i]); }
-function scaleVec(a, s) { return a.map(v => v * s); }
-
-function rk4Step(f, t, y, dt, params) {
-  const k1 = f(t, y, params);
-  const k2 = f(t + dt/2, addVec(y, scaleVec(k1, dt/2)), params);
-  const k3 = f(t + dt/2, addVec(y, scaleVec(k2, dt/2)), params);
-  const k4 = f(t + dt,   addVec(y, scaleVec(k3, dt)),   params);
-  const incr = scaleVec(addVec(addVec(k1, scaleVec(addVec(k2, k3), 2)), k4), dt/6);
-  return addVec(y, incr);
-}
-
-function odeSystem(t, y, p) {
-  let [L, IL6, CRP, Iron, Hb] = y;
-
-  const stim =
-    p.stimAmp *
-    (1 / (1 + Math.exp(-(t - p.stimCenter) / p.stimRise))) *
-    (1 - 1 / (1 + Math.exp(-(t - (p.stimCenter + p.stimWidth)) / p.stimFall)));
-
-  L = clamp(L, 0, 1e9); IL6 = clamp(IL6, 0, 1e9); CRP = clamp(CRP, 0, 1e9);
-  Iron = clamp(Iron, 0, 1e9); Hb = clamp(Hb, 0, 1e9);
-
-  const dIL6 =
-    p.kI_prod * stim +
-    p.kI_anemia * Math.max(0, p.Hb0 - Hb) -
-    p.kI_clear * IL6 -
-    p.kI_resolve * (L / p.L0) * IL6;
-
-  const hillIL6 = Math.pow(IL6, p.nC) / (Math.pow(p.KC, p.nC) + Math.pow(IL6, p.nC));
-  const dCRP = p.kC_prod * hillIL6 - p.kC_clear * CRP;
-
-  const inflam = p.wI * IL6 + p.wC * CRP;
-  const dL = p.kL_recover * (p.L0 - L) - p.kL_suppress * inflam * (L / p.L0);
-
-  const dIron =
-    p.kFe_replete * (p.Fe0 - Iron) - p.kFe_block * IL6 * (Iron / (p.Fe0 + 1e-9));
-
-  const ironFrac = Iron / (p.Fe0 + 1e-9);
-  const hbSupp = 1 / (1 + p.aHbI * IL6 + p.aHbC * CRP);
-  const dHb =
-    p.kHb_prod * ironFrac * hbSupp - p.kHb_decay * (Hb - p.Hb0);
-
-  return [dL, dIL6, dCRP, dIron, dHb];
-}
-
-function simulateDenseTrajectory({t0, t1, dt, y0, params}) {
-  const p = {
-    L0: 2.0, Fe0: 100.0, Hb0: 14.5,
-    stimAmp: 1.3, stimCenter: 5.5, stimWidth: 7.0, stimRise: 0.7, stimFall: 0.7,
-    kI_prod: 18.0, kI_anemia: 0.25, kI_clear: 2.4, kI_resolve: 0.18,
-    kC_prod: 35.0, kC_clear: 1.1, KC: 10.0, nC: 2.0,
-    kL_recover: 0.55, kL_suppress: 0.02, wI: 0.02, wC: 0.01,
-    kFe_replete: 0.65, kFe_block: 0.02,
-    kHb_prod: 0.25, kHb_decay: 0.03, aHbI: 0.02, aHbC: 0.01,
-    ...params,
-  };
-
-  let t = t0;
-  let y = [...y0];
-  const rows = [];
-  const steps = Math.floor((t1 - t0) / dt);
-
-  for (let i = 0; i <= steps; i++) {
-    rows.push({ t, y: [...y] });
-    y = rk4Step(odeSystem, t, y, dt, p);
-    t += dt;
-  }
-  return rows;
-}
-
-function interp1(tArr, yArr, t) {
-  if (t <= tArr[0]) return yArr[0];
-  const n = tArr.length;
-  if (t >= tArr[n-1]) return yArr[n-1];
-  let lo = 0, hi = n - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (tArr[mid] <= t) lo = mid; else hi = mid;
-  }
-  const t0 = tArr[lo], t1 = tArr[hi];
-  const y0 = yArr[lo], y1 = yArr[hi];
-  const w = (t1 === t0) ? 0 : (t - t0) / (t1 - t0);
-  return y0 + (y1 - y0) * w;
-}
-
-/* =========================
-   Noise + patient generator
-   ========================= */
-function addMeasurementNoise5(y5, noiseScale, randn) {
-  const base = [0.03, 0.15, 0.20, 1.5, 0.08];
-  const out = new Array(5);
-  for (let i = 0; i < 5; i++) out[i] = Math.max(0, y5[i] + randn(0, base[i] * noiseScale));
-  return out;
-}
-function genExtraNoiseVec(nExtra, extraSD, randn) {
-  const out = new Array(nExtra);
-  for (let i = 0; i < nExtra; i++) out[i] = randn(0, extraSD);
-  return out;
-}
-
-function generatePatient(snapshot, patientSeed) {
-  const rng = mulberry32(patientSeed);
-  const randn = randnFactory(rng);
-
-  const L = Math.max(1, snapshot.minObs + Math.floor(rng() * (snapshot.maxObs - snapshot.minObs + 1)));
-  const times = new Array(L);
-  for (let i = 0; i < L; i++) times[i] = rng() * snapshot.t1;
-  times.sort((a,b)=>a-b);
-
-  const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
-  const dense = simulateDenseTrajectory({t0:0, t1:snapshot.t1, dt:snapshot.dt, y0, params:snapshot.params});
-  const tDense = dense.map(r => r.t);
-  const yDense = dense.map(r => r.y);
-  const cols = Array.from({length:5}, (_,k)=>yDense.map(v=>v[k]));
-
-  const D = 5 + snapshot.nExtraNoise;
-  const X = new Array(L);
-
-  for (let i = 0; i < L; i++) {
-    const t = times[i];
-    const y5 = new Array(5);
-    for (let k = 0; k < 5; k++) y5[k] = interp1(tDense, cols[k], t);
-
-    const noisy5 = addMeasurementNoise5(y5, snapshot.noiseScale, randn);
-    const extra = genExtraNoiseVec(snapshot.nExtraNoise, snapshot.extraNoiseSD, randn);
-
-    const row = new Array(D);
-    for (let k = 0; k < 5; k++) row[k] = noisy5[k];
-    for (let k = 0; k < snapshot.nExtraNoise; k++) row[5+k] = extra[k];
-    X[i] = row;
-  }
-
-  return {times, X}; // X is [L, D]
-}
-
-/* =========================
-   Plotting
-   ========================= */
-function commonLayout(yTitle, heightPx) {
-  return {
-    height: heightPx,
-    margin: {l: 45, r: 15, t: 6, b: 38},
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: "rgba(0,0,0,0)",
-    font: {color: "#e9eef6"},
-    xaxis: {title: "Time (days)", gridcolor: "#2a2f3a", zerolinecolor: "#2a2f3a"},
-    yaxis: {title: yTitle, gridcolor: "#2a2f3a", zerolinecolor: "#2a2f3a"},
-    legend: {orientation: "h", y: 1.15, x: 0},
-  };
-}
-
-function plotCurrentDense(cleanRows, noisyRows) {
-  const xs = cleanRows.map(r => r.t);
-  const defs = [
-    [0, "plot1", "Lymphocytes"],
-    [1, "plot2", "IL6"],
-    [2, "plot3", "CRP"],
-    [3, "plot4", "Iron"],
-    [4, "plot5_inner", "Hemoglobin"],
-  ];
-  defs.forEach(([idx, divId, yTitle]) => {
-    const div = document.getElementById(divId);
-    const h = Math.max(200, div?.clientHeight || 260);
-    Plotly.react(divId, [
-      {x: xs, y: cleanRows.map(r => r.y[idx]), name:"clean", mode:"lines", line:{width:2}},
-      {x: xs, y: noisyRows.map(r => r.y[idx]), name:"noisy", mode:"markers", marker:{size:4, opacity:0.7}},
-    ], commonLayout(yTitle, h), {displayModeBar:false, responsive:true});
-  });
-}
-
-function plotReconstruction(times, Xorig, Xrec) {
-  const defs = [
-    [0, "recplot1", "Lymphocytes"],
-    [1, "recplot2", "IL6"],
-    [2, "recplot3", "CRP"],
-    [3, "recplot4", "Iron"],
-    [4, "recplot5_inner", "Hemoglobin"],
-  ];
-  defs.forEach(([j, divId, yTitle]) => {
-    const div = document.getElementById(divId);
-    const h = Math.max(200, div?.clientHeight || 260);
-    Plotly.react(divId, [
-      {x: times, y: Xorig.map(r => r[j]), name:"original", mode:"markers+lines", marker:{size:5, opacity:0.8}, line:{width:2}},
-      {x: times, y: Xrec.map(r => r[j]), name:"reconstructed", mode:"lines", line:{width:2, dash:"dot"}},
-    ], commonLayout(yTitle, h), {displayModeBar:false, responsive:true});
-  });
-}
-
-function resizeAllPlots() {
-  const ids = ["plot1","plot2","plot3","plot4","plot5_inner","recplot1","recplot2","recplot3","recplot4","recplot5_inner"];
-  ids.forEach(id => {
-    const d = document.getElementById(id);
-    if (d && d.data) Plotly.Plots.resize(d);
-  });
-}
-window.addEventListener("resize", () => setTimeout(resizeAllPlots, 80));
-window.addEventListener("orientationchange", () => setTimeout(resizeAllPlots, 200));
-
-/* =========================
-   UI
-   ========================= */
-const defaults = {
-  t1:28, dt:0.1,
-  stimAmp:1.3, stimCenter:5.5, stimWidth:7.0,
-  kI_prod:18.0, kI_clear:2.4,
-  kC_prod:35.0, kC_clear:1.1,
-  kFe_block:0.02, kHb_prod:0.25,
-  minObs:25, maxObs:60,
-  noiseScale:1.0,
-  nExtraNoise:0,
-  extraNoiseSD:1.0,
-  seed:1234,
-  nPatients1:80, nPatients2:80,
-  latentDim:16,
-  epochs:60
-};
-
-const ids = Object.keys(defaults);
-const el = {};
-ids.forEach(id => { el[id] = document.getElementById(id); el[id+"_val"] = document.getElementById(id+"_val"); });
-
-function readUI() { const v = {}; ids.forEach(id => v[id] = parseFloat(el[id].value)); return v; }
-function updateValueLabels() {
-  ids.forEach(id => {
-    const raw = el[id].value;
-    let txt = raw;
-    if (["dt","stimAmp","stimCenter","stimWidth","kI_prod","kI_clear","kC_prod","kC_clear","noiseScale","extraNoiseSD","kHb_prod"].includes(id)) txt = Number(raw).toFixed(2);
-    if (id === "kFe_block") txt = Number(raw).toFixed(3);
-    if (["t1","seed","minObs","maxObs","nExtraNoise","nPatients1","nPatients2","latentDim","epochs"].includes(id)) txt = String(parseInt(raw,10));
-    el[id+"_val"].textContent = txt;
-  });
-}
-function setUI(vals) { Object.keys(vals).forEach(k => el[k].value = vals[k]); updateValueLabels(); }
-function enforceMinMaxObs() {
-  const minV = parseInt(el.minObs.value,10);
-  const maxV = parseInt(el.maxObs.value,10);
-  if (minV > maxV) el.maxObs.value = String(minV);
-}
-
-function getODEParamsFromUI(ui) {
-  return {
-    stimAmp: ui.stimAmp, stimCenter: ui.stimCenter, stimWidth: ui.stimWidth,
-    kI_prod: ui.kI_prod, kI_clear: ui.kI_clear,
-    kC_prod: ui.kC_prod, kC_clear: ui.kC_clear,
-    kFe_block: ui.kFe_block, kHb_prod: ui.kHb_prod,
-  };
-}
-
-/* =========================
-   Current ODE panel
-   ========================= */
-function runCurrentODEAndPlot() {
-  const ui = readUI();
-  const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
-  const dense = simulateDenseTrajectory({t0:0, t1:ui.t1, dt:ui.dt, y0, params:getODEParamsFromUI(ui)});
-
-  const rng = mulberry32(Math.floor(ui.seed));
-  const randn = randnFactory(rng);
-  const noisy = dense.map(r => ({t:r.t, y:addMeasurementNoise5(r.y, ui.noiseScale, randn)}));
-
-  plotCurrentDense(dense, noisy);
-}
-
-/* =========================
-   Dataset snapshots
-   ========================= */
-let dataset1 = null, dataset2 = null;
-
-function updateDatasetStatus() {
-  const s = document.getElementById("dsStatus");
-  const fmt = (ds, idx) => ds
-    ? `Dataset ${idx}: <strong>stored</strong> <span class="small">(D=${5+ds.nExtraNoise}, minObs=${ds.minObs}, maxObs=${ds.maxObs})</span>`
-    : `Dataset ${idx}: <strong>not stored</strong>`;
-  s.innerHTML = fmt(dataset1,1) + "<br>" + fmt(dataset2,2);
-}
-
-function refreshPatientSelector() {
-  const which = document.getElementById("whichDS").value;
-  const n = which === "1" ? parseInt(el.nPatients1.value,10) : parseInt(el.nPatients2.value,10);
-  const sel = document.getElementById("whichPatient");
-  sel.innerHTML = "";
-  const m = Math.max(1, n);
-  for (let i = 0; i < m; i++) {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = `Patient #${i}`;
-    sel.appendChild(opt);
-  }
-}
-
-/* =========================================================
-   PLAIN DENSE AE (key fix):
-   - Model input shape is [D] (one variable per dimension)
-   - For each patient, we feed [L, D] to trainOnBatch:
-       L = #observations (varies), acts like minibatch size
-   ========================================================= */
-let aeModel = null;
-let trainMean = null; // Float32Array length D
-let trainStd  = null; // Float32Array length D
-
-function buildDenseAEperObservation(D, latentDim) {
-  // Each observation is a sample of dimension D.
-  // A patient contributes L samples => tensor shape [L,D].
-  const inp = tf.input({shape: [D]});
-
-  const e1 = tf.layers.dense({units: 64, activation: "relu"}).apply(inp);
-  const z  = tf.layers.dense({units: latentDim, activation: "linear", name: "latent"}).apply(e1);
-  const d1 = tf.layers.dense({units: 64, activation: "relu"}).apply(z);
-  const out= tf.layers.dense({units: D, activation: "linear"}).apply(d1);
-
-  const model = tf.model({inputs: inp, outputs: out});
-  model.compile({optimizer: tf.train.adam(1e-3), loss: "meanSquaredError"});
-  return model;
-}
-
-function computeMeanStdAllPatients(patients, D) {
-  const sum = new Float32Array(D);
-  const sumsq = new Float32Array(D);
-  let n = 0;
-
-  for (const p of patients) {
-    for (const row of p.X) {
-      for (let d = 0; d < D; d++) {
-        const v = row[d];
-        sum[d] += v;
-        sumsq[d] += v * v;
-      }
-      n++;
-    }
-  }
-
-  const mean = new Float32Array(D);
-  const std  = new Float32Array(D);
-  for (let d = 0; d < D; d++) {
-    mean[d] = sum[d] / Math.max(1, n);
-    const var_ = (sumsq[d] / Math.max(1, n)) - mean[d] * mean[d];
-    std[d] = Math.sqrt(Math.max(1e-6, var_));
-  }
-  return {mean, std};
-}
-
-function standardizePatientX(X, mean, std) {
-  const L = X.length, D = X[0].length;
-  const Z = new Array(L);
-  for (let i = 0; i < L; i++) {
-    const row = new Array(D);
-    for (let d = 0; d < D; d++) row[d] = (X[i][d] - mean[d]) / std[d];
-    Z[i] = row;
-  }
-  return Z;
-}
-function destandardizePatientZ(Z, mean, std) {
-  const L = Z.length, D = Z[0].length;
-  const X = new Array(L);
-  for (let i = 0; i < L; i++) {
-    const row = new Array(D);
-    for (let d = 0; d < D; d++) row[d] = Z[i][d] * std[d] + mean[d];
-    X[i] = row;
-  }
-  return X;
-}
-
-function snapshotFromUI(ui) {
-  return {
-    t1: ui.t1,
-    dt: ui.dt,
-    params: getODEParamsFromUI(ui),
-    noiseScale: ui.noiseScale,
-    nExtraNoise: parseInt(ui.nExtraNoise,10),
-    extraNoiseSD: ui.extraNoiseSD,
-    minObs: parseInt(ui.minObs,10),
-    maxObs: parseInt(ui.maxObs,10),
-  };
-}
-
-async function buildTrainingPatients() {
-  const ui = readUI();
-  const n1 = parseInt(ui.nPatients1,10);
-  const n2 = parseInt(ui.nPatients2,10);
-
-  if ((!dataset1 && n1 > 0) || (!dataset2 && n2 > 0)) {
-    throw new Error("You requested patients from a dataset that isn't stored.");
-  }
-  if (n1 + n2 <= 0) throw new Error("Set #patients > 0.");
-
-  // Dimensionality must match across datasets to train one AE
-  const snaps = [dataset1, dataset2].filter(Boolean);
-  const first = snaps[0];
-  for (const s of snaps) {
-    if (s.nExtraNoise !== first.nExtraNoise) {
-      throw new Error("Dataset 1 and 2 must have the same nExtraNoise (same D) for mixed training.");
-    }
-  }
-  const D = 5 + first.nExtraNoise;
-
-  const baseSeed = Math.floor(ui.seed);
-  const patients = [];
-  const add = (snap, n, offset) => {
-    for (let i = 0; i < n; i++) patients.push(generatePatient(snap, baseSeed + offset + i));
-  };
-  if (dataset1) add(dataset1, n1, 10000);
-  if (dataset2) add(dataset2, n2, 20000);
-
-  return {patients, D};
-}
-
-async function trainAE() {
-  const statusEl = document.getElementById("trainStatus");
-  const lossEl = document.getElementById("trainLoss");
-  statusEl.innerHTML = "<strong>preparing…</strong>";
-  lossEl.textContent = "—";
-
-  const ui = readUI();
-  const latentDim = parseInt(ui.latentDim,10);
-  const epochs = parseInt(ui.epochs,10);
-
-  try {
-    const {patients, D} = await buildTrainingPatients();
-
-    // compute global mean/std over ALL observations
-    const stats = computeMeanStdAllPatients(patients, D);
-    trainMean = stats.mean;
-    trainStd = stats.std;
-
-    document.getElementById("dimText").textContent = `D=${D} (= 5 + nExtraNoise)`;
-
-    if (aeModel) { aeModel.dispose(); aeModel = null; }
-    aeModel = buildDenseAEperObservation(D, latentDim);
-
-    let lastLoss = null;
-
-    for (let ep = 0; ep < epochs; ep++) {
-      // shuffle patient order each epoch
-      for (let i = patients.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [patients[i], patients[j]] = [patients[j], patients[i]];
-      }
-
-      let epLossSum = 0;
-
-      for (let pi = 0; pi < patients.length; pi++) {
-        const p = patients[pi];
-        const Z = standardizePatientX(p.X, trainMean, trainStd); // [L,D]
-        const x = tf.tensor2d(Z, [Z.length, D], "float32");      // L is minibatch size
-        const loss = await aeModel.trainOnBatch(x, x);
-        x.dispose();
-
-        const lossVal = Array.isArray(loss) ? loss[0] : loss;
-        epLossSum += lossVal;
-
-        // keep UI responsive
-        if ((pi % 4) === 0) await tf.nextFrame();
-      }
-
-      lastLoss = epLossSum / Math.max(1, patients.length);
-      statusEl.innerHTML = `<strong>training…</strong> epoch ${ep+1}/${epochs} <span class="mono">loss=${Number(lastLoss).toExponential(3)}</span>`;
-      await tf.nextFrame();
-    }
-
-    statusEl.innerHTML = "<strong>done</strong>";
-    lossEl.textContent = lastLoss == null ? "—" : Number(lastLoss).toExponential(6);
-  } catch (err) {
-    statusEl.innerHTML = "<strong>error</strong>";
-    lossEl.textContent = String(err.message || err);
-    console.error(err);
-  }
-}
-
-async function reconstructOne() {
-  if (!aeModel) { alert("Train the autoencoder first."); return; }
-  if (!trainMean || !trainStd) { alert("Missing training mean/std."); return; }
-
-  const which = document.getElementById("whichDS").value;
-  const idx = parseInt(document.getElementById("whichPatient").value, 10);
-  const snap = (which === "1") ? dataset1 : dataset2;
-  if (!snap) { alert("Selected dataset not stored."); return; }
-
-  const D = 5 + snap.nExtraNoise;
-  const modelD = aeModel.inputs[0].shape[1];
-  if (modelD !== D) {
-    alert("AE was trained with a different D (nExtraNoise). Re-train with matching nExtraNoise.");
-    return;
-  }
-
-  const ui = readUI();
-  const baseSeed = Math.floor(ui.seed);
-  const patientSeed = baseSeed + (which === "1" ? 10000 : 20000) + idx;
-
-  const p = generatePatient(snap, patientSeed);
-  const Z = standardizePatientX(p.X, trainMean, trainStd);
-
-  const x = tf.tensor2d(Z, [Z.length, D], "float32");  // [L,D]
-  const y = aeModel.predict(x);
-  const Zrec = await y.array();
-  x.dispose(); y.dispose();
-
-  const Xrec = destandardizePatientZ(Zrec, trainMean, trainStd);
-
-  // plot first 5 variables only
-  plotReconstruction(p.times, p.X, Xrec);
-  setTimeout(resizeAllPlots, 60);
-}
-
-/* =========================
-   Events
-   ========================= */
-function onAnyInput() {
-  enforceMinMaxObs();
-  updateValueLabels();
-  runCurrentODEAndPlot();
-  refreshPatientSelector();
-  setTimeout(resizeAllPlots, 60);
-}
-
-ids.forEach(id => el[id].addEventListener("input", onAnyInput));
-
-document.getElementById("rerun").addEventListener("click", () => { runCurrentODEAndPlot(); setTimeout(resizeAllPlots, 60); });
-document.getElementById("reset").addEventListener("click", () => {
-  setUI(defaults);
-  runCurrentODEAndPlot();
-  refreshPatientSelector();
-  setTimeout(resizeAllPlots, 60);
-});
-
-document.getElementById("store1").addEventListener("click", () => {
-  const ui = readUI();
-  dataset1 = snapshotFromUI(ui);
-  updateDatasetStatus();
-  refreshPatientSelector();
-});
-document.getElementById("store2").addEventListener("click", () => {
-  const ui = readUI();
-  dataset2 = snapshotFromUI(ui);
-  updateDatasetStatus();
-  refreshPatientSelector();
-});
-
-document.getElementById("trainAE").addEventListener("click", () => trainAE());
-document.getElementById("whichDS").addEventListener("change", () => refreshPatientSelector());
-document.getElementById("reconstructBtn").addEventListener("click", () => reconstructOne());
-
-/* =========================
-   Init
-   ========================= */
-setUI(defaults);
-updateDatasetStatus();
-runCurrentODEAndPlot();
-refreshPatientSelector();
-document.getElementById("dimText").textContent = "Train to set D";
-setTimeout(resizeAllPlots, 100);
-
-// empty reconstruction plots
-plotReconstruction([0], [[0,0,0,0,0]], [[0,0,0,0,0]]);
-</script>
+		function mulberry32(seed) {
+			let t = seed >>> 0;
+			return function() {
+				t += 0x6D2B79F5;
+				let x = Math.imul(t ^ (t >>> 15), 1 | t);
+				x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+				return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+			}
+		}
+
+		function randnFactory(rng) {
+			return function(mean = 0, sd = 1) {
+				let u = 0,
+					v = 0;
+				while (u === 0) u = rng();
+				while (v === 0) v = rng();
+				const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+				return mean + sd * z;
+			};
+		}
+
+		/* =========================
+		   ODE + RK4
+		   ========================= */
+		function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+		function addVec(a, b) { return a.map((v, i) => v + b[i]); }
+
+		function scaleVec(a, s) { return a.map(v => v * s); }
+
+		function rk4Step(f, t, y, dt, params) {
+			const k1 = f(t, y, params);
+			const k2 = f(t + dt / 2, addVec(y, scaleVec(k1, dt / 2)), params);
+			const k3 = f(t + dt / 2, addVec(y, scaleVec(k2, dt / 2)), params);
+			const k4 = f(t + dt, addVec(y, scaleVec(k3, dt)), params);
+			const incr = scaleVec(addVec(addVec(k1, scaleVec(addVec(k2, k3), 2)), k4), dt / 6);
+			return addVec(y, incr);
+		}
+
+		function odeSystem(t, y, p) {
+			let [L, IL6, CRP, Iron, Hb] = y;
+
+			const stim =
+				p.stimAmp *
+				(1 / (1 + Math.exp(-(t - p.stimCenter) / p.stimRise))) *
+				(1 - 1 / (1 + Math.exp(-(t - (p.stimCenter + p.stimWidth)) / p.stimFall)));
+
+			L = clamp(L, 0, 1e9);
+			IL6 = clamp(IL6, 0, 1e9);
+			CRP = clamp(CRP, 0, 1e9);
+			Iron = clamp(Iron, 0, 1e9);
+			Hb = clamp(Hb, 0, 1e9);
+
+			const dIL6 =
+				p.kI_prod * stim +
+				p.kI_anemia * Math.max(0, p.Hb0 - Hb) -
+				p.kI_clear * IL6 -
+				p.kI_resolve * (L / p.L0) * IL6;
+
+			const hillIL6 = Math.pow(IL6, p.nC) / (Math.pow(p.KC, p.nC) + Math.pow(IL6, p.nC));
+			const dCRP = p.kC_prod * hillIL6 - p.kC_clear * CRP;
+
+			const inflam = p.wI * IL6 + p.wC * CRP;
+			const dL = p.kL_recover * (p.L0 - L) - p.kL_suppress * inflam * (L / p.L0);
+
+			const dIron =
+				p.kFe_replete * (p.Fe0 - Iron) - p.kFe_block * IL6 * (Iron / (p.Fe0 + 1e-9));
+
+			const ironFrac = Iron / (p.Fe0 + 1e-9);
+			const hbSupp = 1 / (1 + p.aHbI * IL6 + p.aHbC * CRP);
+			const dHb =
+				p.kHb_prod * ironFrac * hbSupp - p.kHb_decay * (Hb - p.Hb0);
+
+			return [dL, dIL6, dCRP, dIron, dHb];
+		}
+
+		function simulateDenseTrajectory({ t0, t1, dt, y0, params }) {
+			const p = {
+				L0: 2.0,
+				Fe0: 100.0,
+				Hb0: 14.5,
+				stimAmp: 1.3,
+				stimCenter: 5.5,
+				stimWidth: 7.0,
+				stimRise: 0.7,
+				stimFall: 0.7,
+				kI_prod: 18.0,
+				kI_anemia: 0.25,
+				kI_clear: 2.4,
+				kI_resolve: 0.18,
+				kC_prod: 35.0,
+				kC_clear: 1.1,
+				KC: 10.0,
+				nC: 2.0,
+				kL_recover: 0.55,
+				kL_suppress: 0.02,
+				wI: 0.02,
+				wC: 0.01,
+				kFe_replete: 0.65,
+				kFe_block: 0.02,
+				kHb_prod: 0.25,
+				kHb_decay: 0.03,
+				aHbI: 0.02,
+				aHbC: 0.01,
+				...params,
+			};
+
+			let t = t0;
+			let y = [...y0];
+			const rows = [];
+			const steps = Math.floor((t1 - t0) / dt);
+
+			for (let i = 0; i <= steps; i++) {
+				rows.push({ t, y: [...y] });
+				y = rk4Step(odeSystem, t, y, dt, p);
+				t += dt;
+			}
+			return rows;
+		}
+
+		function interp1(tArr, yArr, t) {
+			if (t <= tArr[0]) return yArr[0];
+			const n = tArr.length;
+			if (t >= tArr[n - 1]) return yArr[n - 1];
+			let lo = 0,
+				hi = n - 1;
+			while (hi - lo > 1) {
+				const mid = (lo + hi) >> 1;
+				if (tArr[mid] <= t) lo = mid;
+				else hi = mid;
+			}
+			const t0 = tArr[lo],
+				t1 = tArr[hi];
+			const y0 = yArr[lo],
+				y1 = yArr[hi];
+			const w = (t1 === t0) ? 0 : (t - t0) / (t1 - t0);
+			return y0 + (y1 - y0) * w;
+		}
+
+		/* =========================
+		   Noise + patient generator
+		   ========================= */
+		function addMeasurementNoise5(y5, noiseScale, randn) {
+			const base = [0.03, 0.15, 0.20, 1.5, 0.08];
+			const out = new Array(5);
+			for (let i = 0; i < 5; i++) out[i] = Math.max(0, y5[i] + randn(0, base[i] * noiseScale));
+			return out;
+		}
+
+		function genExtraNoiseVec(nExtra, extraSD, randn) {
+			const out = new Array(nExtra);
+			for (let i = 0; i < nExtra; i++) out[i] = randn(0, extraSD);
+			return out;
+		}
+
+		function generatePatient(snapshot, patientSeed) {
+			const rng = mulberry32(patientSeed);
+			const randn = randnFactory(rng);
+
+			const L = Math.max(1, snapshot.minObs + Math.floor(rng() * (snapshot.maxObs - snapshot.minObs + 1)));
+			const times = new Array(L);
+			for (let i = 0; i < L; i++) times[i] = rng() * snapshot.t1;
+			times.sort((a, b) => a - b);
+
+			const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
+			const dense = simulateDenseTrajectory({ t0: 0, t1: snapshot.t1, dt: snapshot.dt, y0, params: snapshot.params });
+			const tDense = dense.map(r => r.t);
+			const yDense = dense.map(r => r.y);
+			const cols = Array.from({ length: 5 }, (_, k) => yDense.map(v => v[k]));
+
+			const D = 5 + snapshot.nExtraNoise;
+			const X = new Array(L);
+
+			for (let i = 0; i < L; i++) {
+				const t = times[i];
+				const y5 = new Array(5);
+				for (let k = 0; k < 5; k++) y5[k] = interp1(tDense, cols[k], t);
+
+				const noisy5 = addMeasurementNoise5(y5, snapshot.noiseScale, randn);
+				const extra = genExtraNoiseVec(snapshot.nExtraNoise, snapshot.extraNoiseSD, randn);
+
+				const row = new Array(D);
+				for (let k = 0; k < 5; k++) row[k] = noisy5[k];
+				for (let k = 0; k < snapshot.nExtraNoise; k++) row[5 + k] = extra[k];
+				X[i] = row;
+			}
+
+			return { times, X }; // X is [L, D]
+		}
+
+		/* =========================
+		   Plotting
+		   ========================= */
+		function commonLayout(yTitle, heightPx) {
+			return {
+				height: heightPx,
+				margin: { l: 45, r: 15, t: 6, b: 38 },
+				paper_bgcolor: "rgba(0,0,0,0)",
+				plot_bgcolor: "rgba(0,0,0,0)",
+				font: { color: "#e9eef6" },
+				xaxis: { title: "Time (days)", gridcolor: "#2a2f3a", zerolinecolor: "#2a2f3a" },
+				yaxis: { title: yTitle, gridcolor: "#2a2f3a", zerolinecolor: "#2a2f3a" },
+				legend: { orientation: "h", y: 1.15, x: 0 },
+			};
+		}
+
+		function plotCurrentDense(cleanRows, noisyRows) {
+			const xs = cleanRows.map(r => r.t);
+			const defs = [
+				[0, "plot1", "Lymphocytes"],
+				[1, "plot2", "IL6"],
+				[2, "plot3", "CRP"],
+				[3, "plot4", "Iron"],
+				[4, "plot5_inner", "Hemoglobin"],
+			];
+			defs.forEach(([idx, divId, yTitle]) => {
+				const div = document.getElementById(divId);
+				const h = Math.max(200, div?.clientHeight || 260);
+				Plotly.react(divId, [
+					{ x: xs, y: cleanRows.map(r => r.y[idx]), name: "clean", mode: "lines", line: { width: 2 } },
+					{ x: xs, y: noisyRows.map(r => r.y[idx]), name: "noisy", mode: "markers", marker: { size: 4, opacity: 0.7 } },
+				], commonLayout(yTitle, h), { displayModeBar: false, responsive: true });
+			});
+		}
+
+		function plotReconstruction(times, Xorig, Xrec) {
+			const defs = [
+				[0, "recplot1", "Lymphocytes"],
+				[1, "recplot2", "IL6"],
+				[2, "recplot3", "CRP"],
+				[3, "recplot4", "Iron"],
+				[4, "recplot5_inner", "Hemoglobin"],
+			];
+			defs.forEach(([j, divId, yTitle]) => {
+				const div = document.getElementById(divId);
+				const h = Math.max(200, div?.clientHeight || 260);
+				Plotly.react(divId, [
+					{ x: times, y: Xorig.map(r => r[j]), name: "original", mode: "markers+lines", marker: { size: 5, opacity: 0.8 }, line: { width: 2 } },
+					{ x: times, y: Xrec.map(r => r[j]), name: "reconstructed", mode: "lines", line: { width: 2, dash: "dot" } },
+				], commonLayout(yTitle, h), { displayModeBar: false, responsive: true });
+			});
+		}
+
+		function resizeAllPlots() {
+			const ids = ["plot1", "plot2", "plot3", "plot4", "plot5_inner", "recplot1", "recplot2", "recplot3", "recplot4", "recplot5_inner"];
+			ids.forEach(id => {
+				const d = document.getElementById(id);
+				if (d && d.data) Plotly.Plots.resize(d);
+			});
+		}
+		window.addEventListener("resize", () => setTimeout(resizeAllPlots, 80));
+		window.addEventListener("orientationchange", () => setTimeout(resizeAllPlots, 200));
+
+		/* =========================
+		   UI
+		   ========================= */
+		const defaults = {
+			t1: 28,
+			dt: 0.1,
+			stimAmp: 1.3,
+			stimCenter: 5.5,
+			stimWidth: 7.0,
+			kI_prod: 18.0,
+			kI_clear: 2.4,
+			kC_prod: 35.0,
+			kC_clear: 1.1,
+			kFe_block: 0.02,
+			kHb_prod: 0.25,
+			minObs: 3,
+			maxObs: 10,
+			noiseScale: 1.0,
+			nExtraNoise: 5,
+			extraNoiseSD: 1.0,
+			seed: 1234,
+			nPatients1: 80,
+			nPatients2: 10,
+			latentDim: 2,
+			epochs: 60
+		};
+
+		const ids = Object.keys(defaults);
+		const el = {};
+		ids.forEach(id => {
+			el[id] = document.getElementById(id);
+			el[id + "_val"] = document.getElementById(id + "_val");
+		});
+
+		function readUI() {
+			const v = {};
+			ids.forEach(id => v[id] = parseFloat(el[id].value));
+			return v;
+		}
+
+		function updateValueLabels() {
+			ids.forEach(id => {
+				const raw = el[id].value;
+				let txt = raw;
+				if (["dt", "stimAmp", "stimCenter", "stimWidth", "kI_prod", "kI_clear", "kC_prod", "kC_clear", "noiseScale", "extraNoiseSD", "kHb_prod"].includes(id)) txt = Number(raw).toFixed(2);
+				if (id === "kFe_block") txt = Number(raw).toFixed(3);
+				if (["t1", "seed", "minObs", "maxObs", "nExtraNoise", "nPatients1", "nPatients2", "latentDim", "epochs"].includes(id)) txt = String(parseInt(raw, 10));
+				el[id + "_val"].textContent = txt;
+			});
+		}
+
+		function setUI(vals) {
+			Object.keys(vals).forEach(k => el[k].value = vals[k]);
+			updateValueLabels();
+		}
+
+		function enforceMinMaxObs() {
+			const minV = parseInt(el.minObs.value, 10);
+			const maxV = parseInt(el.maxObs.value, 10);
+			if (minV > maxV) el.maxObs.value = String(minV);
+		}
+
+		function getODEParamsFromUI(ui) {
+			return {
+				stimAmp: ui.stimAmp,
+				stimCenter: ui.stimCenter,
+				stimWidth: ui.stimWidth,
+				kI_prod: ui.kI_prod,
+				kI_clear: ui.kI_clear,
+				kC_prod: ui.kC_prod,
+				kC_clear: ui.kC_clear,
+				kFe_block: ui.kFe_block,
+				kHb_prod: ui.kHb_prod,
+			};
+		}
+
+		/* =========================
+		   Current ODE panel
+		   ========================= */
+		function runCurrentODEAndPlot() {
+			const ui = readUI();
+			const y0 = [2.2, 2.5, 1.5, 105.0, 14.8];
+			const dense = simulateDenseTrajectory({ t0: 0, t1: ui.t1, dt: ui.dt, y0, params: getODEParamsFromUI(ui) });
+
+			const rng = mulberry32(Math.floor(ui.seed));
+			const randn = randnFactory(rng);
+			const noisy = dense.map(r => ({ t: r.t, y: addMeasurementNoise5(r.y, ui.noiseScale, randn) }));
+
+			plotCurrentDense(dense, noisy);
+		}
+
+		/* =========================
+		   Dataset snapshots
+		   ========================= */
+		let dataset1 = null,
+			dataset2 = null;
+
+		function updateDatasetStatus() {
+			const s = document.getElementById("dsStatus");
+			const fmt = (ds, idx) => ds ?
+				`Dataset ${idx}: <strong>stored</strong> <span class="small">(D=${5+ds.nExtraNoise}, minObs=${ds.minObs}, maxObs=${ds.maxObs})</span>` :
+				`Dataset ${idx}: <strong>not stored</strong>`;
+			s.innerHTML = fmt(dataset1, 1) + "<br>" + fmt(dataset2, 2);
+		}
+
+		function refreshPatientSelector() {
+			const which = document.getElementById("whichDS").value;
+			const n = which === "1" ? parseInt(el.nPatients1.value, 10) : parseInt(el.nPatients2.value, 10);
+			const sel = document.getElementById("whichPatient");
+			sel.innerHTML = "";
+			const m = Math.max(1, n);
+			for (let i = 0; i < m; i++) {
+				const opt = document.createElement("option");
+				opt.value = String(i);
+				opt.textContent = `Patient #${i}`;
+				sel.appendChild(opt);
+			}
+		}
+
+		/* =========================================================
+		   PLAIN DENSE AE (key fix):
+		   - Model input shape is [D] (one variable per dimension)
+		   - For each patient, we feed [L, D] to trainOnBatch:
+		       L = #observations (varies), acts like minibatch size
+		   ========================================================= */
+		let aeModel = null;
+		let trainMean = null; // Float32Array length D
+		let trainStd = null; // Float32Array length D
+
+		function buildDenseAEperObservation(D, latentDim) {
+			// Each observation is a sample of dimension D.
+			// A patient contributes L samples => tensor shape [L,D].
+			const inp = tf.input({ shape: [D] });
+
+			const e1 = tf.layers.dense({ units: 64, activation: "relu" }).apply(inp);
+			const z = tf.layers.dense({ units: latentDim, activation: "linear", name: "latent" }).apply(e1);
+			const d1 = tf.layers.dense({ units: 64, activation: "relu" }).apply(z);
+			const out = tf.layers.dense({ units: D, activation: "linear" }).apply(d1);
+
+			const model = tf.model({ inputs: inp, outputs: out });
+			model.compile({ optimizer: tf.train.adam(1e-3), loss: "meanSquaredError" });
+			return model;
+		}
+
+		function computeMeanStdAllPatients(patients, D) {
+			const sum = new Float32Array(D);
+			const sumsq = new Float32Array(D);
+			let n = 0;
+
+			for (const p of patients) {
+				for (const row of p.X) {
+					for (let d = 0; d < D; d++) {
+						const v = row[d];
+						sum[d] += v;
+						sumsq[d] += v * v;
+					}
+					n++;
+				}
+			}
+
+			const mean = new Float32Array(D);
+			const std = new Float32Array(D);
+			for (let d = 0; d < D; d++) {
+				mean[d] = sum[d] / Math.max(1, n);
+				const var_ = (sumsq[d] / Math.max(1, n)) - mean[d] * mean[d];
+				std[d] = Math.sqrt(Math.max(1e-6, var_));
+			}
+			return { mean, std };
+		}
+
+		function standardizePatientX(X, mean, std) {
+			const L = X.length,
+				D = X[0].length;
+			const Z = new Array(L);
+			for (let i = 0; i < L; i++) {
+				const row = new Array(D);
+				for (let d = 0; d < D; d++) row[d] = (X[i][d] - mean[d]) / std[d];
+				Z[i] = row;
+			}
+			return Z;
+		}
+
+		function destandardizePatientZ(Z, mean, std) {
+			const L = Z.length,
+				D = Z[0].length;
+			const X = new Array(L);
+			for (let i = 0; i < L; i++) {
+				const row = new Array(D);
+				for (let d = 0; d < D; d++) row[d] = Z[i][d] * std[d] + mean[d];
+				X[i] = row;
+			}
+			return X;
+		}
+
+		function snapshotFromUI(ui) {
+			return {
+				t1: ui.t1,
+				dt: ui.dt,
+				params: getODEParamsFromUI(ui),
+				noiseScale: ui.noiseScale,
+				nExtraNoise: parseInt(ui.nExtraNoise, 10),
+				extraNoiseSD: ui.extraNoiseSD,
+				minObs: parseInt(ui.minObs, 10),
+				maxObs: parseInt(ui.maxObs, 10),
+			};
+		}
+
+		async function buildTrainingPatients() {
+			const ui = readUI();
+			const n1 = parseInt(ui.nPatients1, 10);
+			const n2 = parseInt(ui.nPatients2, 10);
+
+			if ((!dataset1 && n1 > 0) || (!dataset2 && n2 > 0)) {
+				throw new Error("You requested patients from a dataset that isn't stored.");
+			}
+			if (n1 + n2 <= 0) throw new Error("Set #patients > 0.");
+
+			// Dimensionality must match across datasets to train one AE
+			const snaps = [dataset1, dataset2].filter(Boolean);
+			const first = snaps[0];
+			for (const s of snaps) {
+				if (s.nExtraNoise !== first.nExtraNoise) {
+					throw new Error("Dataset 1 and 2 must have the same nExtraNoise (same D) for mixed training.");
+				}
+			}
+			const D = 5 + first.nExtraNoise;
+
+			const baseSeed = Math.floor(ui.seed);
+			const patients = [];
+			const add = (snap, n, offset) => {
+				for (let i = 0; i < n; i++) patients.push(generatePatient(snap, baseSeed + offset + i));
+			};
+			if (dataset1) add(dataset1, n1, 10000);
+			if (dataset2) add(dataset2, n2, 20000);
+
+			return { patients, D };
+		}
+
+		function buildGlobalTensors(patients, D, mean, std) {
+			const allRows = [];
+			const pidArr = []; // patient id per row
+			const rowsByPatient = []; // rowsByPatient[pid] = [rowIdx0, rowIdx1, ...]
+
+			let row = 0;
+			for (let pid = 0; pid < patients.length; pid++) {
+				const Z = standardizePatientX(patients[pid].X, mean, std); // array [L,D]
+				rowsByPatient[pid] = [];
+				for (let i = 0; i < Z.length; i++) {
+					allRows.push(Z[i]);
+					pidArr.push(pid);
+					rowsByPatient[pid].push(row);
+					row++;
+				}
+			}
+
+			const N = allRows.length;
+			const Xall = tf.tensor2d(allRows, [N, D], "float32");
+			const pid = tf.tensor1d(pidArr, "int32");
+			return { Xall, pid, rowsByPatient, N };
+		}
+
+		function sampleBatchBalanced(rowsByPatient, patientsPerBatch, obsPerPatient) {
+			const P = rowsByPatient.length;
+			const idx = [];
+
+			// sample patients (without replacement)
+			const pids = [...Array(P).keys()];
+			for (let i = P - 1; i > 0; i--) {
+				const j = (Math.random() * (i + 1)) | 0;
+				[pids[i], pids[j]] = [pids[j], pids[i]];
+			}
+			const chosen = pids.slice(0, patientsPerBatch);
+
+			for (const pid of chosen) {
+				const rows = rowsByPatient[pid];
+				for (let t = 0; t < obsPerPatient; t++) {
+					const r = rows[(Math.random() * rows.length) | 0];
+					idx.push(r);
+				}
+			}
+			return idx; // JS array of row indices
+		}
+
+		function sampleBatchFromPatientSet(rowsByPatient, allowedPids, batchSize) {
+			const idx = [];
+			for (let i = 0; i < batchSize; i++) {
+				const pid = allowedPids[(Math.random() * allowedPids.length) | 0];
+				const rows = rowsByPatient[pid];
+				idx.push(rows[(Math.random() * rows.length) | 0]);
+			}
+			return idx;
+		}
+		async function trainStepAE(aeModel, Xall, idxArray) {
+			const idxT = tf.tensor1d(idxArray, "int32");
+			const xb = Xall.gather(idxT);
+			const loss = await aeModel.trainOnBatch(xb, xb);
+			idxT.dispose();
+			xb.dispose();
+			return Array.isArray(loss) ? loss[0] : loss;
+		}
+
+		async function trainAE() {
+			const statusEl = document.getElementById("trainStatus");
+			const lossEl = document.getElementById("trainLoss");
+			statusEl.innerHTML = "<strong>preparing…</strong>";
+			lossEl.textContent = "—";
+
+			const ui = readUI();
+			const latentDim = parseInt(ui.latentDim, 10);
+			const epochs = parseInt(ui.epochs, 10);
+
+			try {
+
+				const { patients, D } = await buildTrainingPatients();
+				//console.log(patients)
+				// compute global mean/std over ALL observations
+				const stats = computeMeanStdAllPatients(patients, D);
+				trainMean = stats.mean;
+				trainStd = stats.std;
+
+				document.getElementById("dimText").textContent = `D=${D} (= 5 + nExtraNoise)`;
+
+				if (aeModel) {
+					aeModel.dispose();
+					aeModel = null;
+				}
+				aeModel = buildDenseAEperObservation(D, latentDim);
+
+				let lastLoss = null;
+
+				for (let ep = 0; ep < epochs; ep++) {
+					// shuffle patient order each epoch
+					for (let i = patients.length - 1; i > 0; i--) {
+						const j = Math.floor(Math.random() * (i + 1));
+						[patients[i], patients[j]] = [patients[j], patients[i]];
+					}
+
+					let epLossSum = 0;
+
+					for (let pi = 0; pi < patients.length; pi++) {
+						const p = patients[pi];
+						const Z = standardizePatientX(p.X, trainMean, trainStd); // [L,D]
+						const x = tf.tensor2d(Z, [Z.length, D], "float32"); // L is minibatch size
+						const loss = await aeModel.trainOnBatch(x, x);
+						x.dispose();
+
+						const lossVal = Array.isArray(loss) ? loss[0] : loss;
+						epLossSum += lossVal;
+
+						// keep UI responsive
+						if ((pi % 4) === 0) await tf.nextFrame();
+					}
+
+					lastLoss = epLossSum / Math.max(1, patients.length);
+					statusEl.innerHTML = `<strong>training…</strong> epoch ${ep+1}/${epochs} <span class="mono">loss=${Number(lastLoss).toExponential(3)}</span>`;
+					await tf.nextFrame();
+				}
+
+				statusEl.innerHTML = "<strong>done</strong>";
+				lossEl.textContent = lastLoss == null ? "—" : Number(lastLoss).toExponential(6);
+			} catch (err) {
+				statusEl.innerHTML = "<strong>error</strong>";
+				lossEl.textContent = String(err.message || err);
+				console.error(err);
+			}
+		}
+
+		async function trainAE_tensor() {
+			const statusEl = document.getElementById("trainStatus");
+			const lossEl = document.getElementById("trainLoss");
+			statusEl.innerHTML = "<strong>preparing…</strong>";
+			lossEl.textContent = "—";
+
+			const ui = readUI();
+			const latentDim = parseInt(ui.latentDim, 10);
+			const epochs = parseInt(ui.epochs, 10);
+
+			try {
+
+				const { patients, D } = await buildTrainingPatients();
+				//console.log(patients)
+				// compute global mean/std over ALL observations
+				const stats = computeMeanStdAllPatients(patients, D);
+				trainMean = stats.mean;
+				trainStd = stats.std;
+
+				document.getElementById("dimText").textContent = `D=${D} (= 5 + nExtraNoise)`;
+
+				if (aeModel) {
+					aeModel.dispose(); //dump old AE if present
+					aeModel = null;
+				}
+				aeModel = buildDenseAEperObservation(D, latentDim);
+
+				let lastLoss = null;
+				const { Xall, lid, rowsByPatient, N } = buildGlobalTensors(patients, D, trainMean, trainStd);
+
+				// hyperparams
+				const batchPatients = 20;
+				const obsPerPatient = 32;
+				const stepsPerEpoch = 8;
+
+				for (let ep = 0; ep < epochs; ep++) {
+					let epLoss = 0;
+					for (let step = 0; step < stepsPerEpoch; step++) {
+						const idx = sampleBatchBalanced(rowsByPatient, batchPatients, obsPerPatient);
+						const lossVal = await trainStepAE(aeModel, Xall, idx);
+						epLoss += lossVal;
+
+						if ((step % 10) === 0) await tf.nextFrame();
+					}
+					const lastLoss = epLoss / stepsPerEpoch;
+					// update UI...
+				
+
+				
+
+
+				statusEl.innerHTML = `<strong>training…</strong> epoch ${ep+1}/${epochs} <span class="mono">loss=${Number(lastLoss).toExponential(3)}</span>`;
+				await tf.nextFrame();
+			}
+
+			statusEl.innerHTML = "<strong>done</strong>";
+			lossEl.textContent = lastLoss == null ? "—" : Number(lastLoss).toExponential(6);
+		} catch (err) {
+			statusEl.innerHTML = "<strong>error</strong>";
+			lossEl.textContent = String(err.message || err);
+			console.error(err);
+		}
+		// cleanup
+				Xall.dispose();
+				lid.dispose();
+		}
+
+		async function reconstructOne() {
+			if (!aeModel) { alert("Train the autoencoder first."); return; }
+			if (!trainMean || !trainStd) { alert("Missing training mean/std."); return; }
+
+			const which = document.getElementById("whichDS").value;
+			const idx = parseInt(document.getElementById("whichPatient").value, 10);
+			const snap = (which === "1") ? dataset1 : dataset2;
+			if (!snap) { alert("Selected dataset not stored."); return; }
+
+			const D = 5 + snap.nExtraNoise;
+			const modelD = aeModel.inputs[0].shape[1];
+			if (modelD !== D) {
+				alert("AE was trained with a different D (nExtraNoise). Re-train with matching nExtraNoise.");
+				return;
+			}
+
+			const ui = readUI();
+			const baseSeed = Math.floor(ui.seed);
+			const patientSeed = baseSeed + (which === "1" ? 10000 : 20000) + idx;
+
+			const p = generatePatient(snap, patientSeed);
+			const Z = standardizePatientX(p.X, trainMean, trainStd);
+
+			const x = tf.tensor2d(Z, [Z.length, D], "float32"); // [L,D]
+			const y = aeModel.predict(x);
+			const Zrec = await y.array();
+			x.dispose();
+			y.dispose();
+
+			const Xrec = destandardizePatientZ(Zrec, trainMean, trainStd);
+
+			// plot first 5 variables only
+			plotReconstruction(p.times, p.X, Xrec);
+			setTimeout(resizeAllPlots, 60);
+		}
+
+		/* =========================
+		   Events
+		   ========================= */
+		function onAnyInput() {
+			enforceMinMaxObs();
+			updateValueLabels();
+			runCurrentODEAndPlot();
+			refreshPatientSelector();
+			setTimeout(resizeAllPlots, 60);
+		}
+
+		ids.forEach(id => el[id].addEventListener("input", onAnyInput));
+
+		document.getElementById("rerun").addEventListener("click", () => {
+			runCurrentODEAndPlot();
+			setTimeout(resizeAllPlots, 60);
+		});
+		document.getElementById("reset").addEventListener("click", () => {
+			setUI(defaults);
+			runCurrentODEAndPlot();
+			refreshPatientSelector();
+			setTimeout(resizeAllPlots, 60);
+		});
+
+		document.getElementById("store1").addEventListener("click", () => {
+			const ui = readUI();
+			dataset1 = snapshotFromUI(ui);
+			updateDatasetStatus();
+			refreshPatientSelector();
+		});
+		document.getElementById("store2").addEventListener("click", () => {
+			const ui = readUI();
+			dataset2 = snapshotFromUI(ui);
+			updateDatasetStatus();
+			refreshPatientSelector();
+		});
+
+		document.getElementById("trainAE").addEventListener("click", () => trainAE_tensor());
+		document.getElementById("whichDS").addEventListener("change", () => refreshPatientSelector());
+		document.getElementById("reconstructBtn").addEventListener("click", () => reconstructOne());
+
+		/* =========================
+		   Init
+		   ========================= */
+		setUI(defaults);
+		updateDatasetStatus();
+		runCurrentODEAndPlot();
+		refreshPatientSelector();
+		document.getElementById("dimText").textContent = "Train to set D";
+		setTimeout(resizeAllPlots, 100);
+
+		// empty reconstruction plots
+		plotReconstruction([0], [
+			[0, 0, 0, 0, 0]
+		], [
+			[0, 0, 0, 0, 0]
+		]);
+	</script>
 </body>
+
 </html>
